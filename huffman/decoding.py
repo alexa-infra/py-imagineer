@@ -43,7 +43,7 @@ def decode_table(inp):
         code = code << 1
         for _ in range(s):
             k = struct.unpack('B', inp.read(1))[0]
-            codes[k] = byte_to_bits(code, l)
+            codes[k] = byte_to_bits(code, l + 1)
             code += 1
     return codes
 

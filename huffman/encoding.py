@@ -34,7 +34,7 @@ def iter_codes(text, codes):
 def encode_table(codes, output):
     sizes = [0 for x in range(16)]
     for v in codes.values():
-        sizes[len(v)] += 1
+        sizes[len(v) - 1] += 1
     for s in sizes:
         write8(output, s)
     acodes = list(codes.items())
