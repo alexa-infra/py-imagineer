@@ -6,6 +6,7 @@ from itertools import islice, repeat
 
 import huffman
 from .scan_decode import decode_baseline
+from . import sof_types
 
 
 SOF, DHT, DAC, JPG, RST, SOI, EOI, SOS, DQT, DNL, DRI, DHP, EXP, APP, COM = tuple(range(15))
@@ -145,85 +146,6 @@ def parse_APP(self, marker, *args): # pylint: disable=unused-argument
             data.read(5)
             self.adobe_color_transform = read_u8(data)
 
-SOF_all = (
-    0xFFC0,
-    0xFFC1,
-    0xFFC2,
-    0xFFC3,
-    0xFFC5,
-    0xFFC6,
-    0xFFC7,
-    0xFFC9,
-    0xFFCA,
-    0xFFCB,
-    0xFFCD,
-    0xFFCE,
-    0xFFCF,
-)
-
-# Hierarchical, storing multiple images of different sizes
-# nonexistent in the world, thus not supported
-SOF_differential = (
-    0xFFC5,
-    0xFFC6,
-    0xFFC7,
-    0xFFCD,
-    0xFFCE,
-    0xFFCF,
-)
-
-SOF_baseline = (
-    0xFFC0,
-)
-
-SOF_sequential = (
-    0xFFC1,
-    0xFFC5,
-    0xFFC9,
-    0xFFCD,
-)
-
-SOF_progressive = (
-    0xFFC2,
-    0xFFC6,
-    0xFFCA,
-    0xFFCE,
-)
-
-# Loseless are known, but not widely used, thus not supported
-SOF_loseless = (
-    0xFFC3,
-    0xFFC7,
-    0xFFCB,
-    0xFFCF,
-)
-
-SOF_huffman = (
-    0xFFC0,
-    0xFFC1,
-    0xFFC2,
-    0xFFC3,
-    0xFFC5,
-    0xFFC6,
-    0xFFC7,
-)
-
-# better alternative to huffman, but not widely used
-# and proprietar, thus not supported
-SOF_arithmetic = (
-    0xFFC9,
-    0xFFCA,
-    0xFFCB,
-    0xFFCD,
-    0xFFCE,
-    0xFFCF,
-)
-
-SOF_supported = (
-    0xFFC0,
-    0xFFC1,
-    0xFFC2,
-)
 
 def parse_SOF(self, marker, *args): # pylint: disable=unused-argument
 
@@ -377,9 +299,9 @@ class Component:
 
 class Frame:
     def __init__(self, marker, w, h, cc):
-        self.extended = marker in SOF_sequential
-        self.progressive = marker in SOF_progressive
-        self.huffman = marker in SOF_huffman
+        self.baseline = marker in sof_types.baseline
+        self.extended = marker in sof_types.sequential
+        self.progressive = marker in sof_types.progressive
         self.h = h
         self.w = w
         self.num_components = cc
@@ -460,9 +382,9 @@ class JpegImage:
 
         assert markers.count(SOF) == 1
         SOF_marker = next(c for c, m, p in marker_codes if m == SOF)
-        assert SOF_marker not in SOF_differential
-        assert SOF_marker not in SOF_loseless
-        assert SOF_marker not in SOF_arithmetic
+        assert SOF_marker not in sof_types.differential
+        assert SOF_marker not in sof_types.loseless
+        assert SOF_marker not in sof_types.arithmetic
 
         assert SOS in markers
 
