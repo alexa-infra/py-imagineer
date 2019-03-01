@@ -9,21 +9,46 @@ read8 = lambda inp: struct.unpack('B', inp.read(1))[0]
 read16 = lambda inp: struct.unpack('<H', inp.read(2))[0]
 
 
-def decode_iterator(data, codes, length):
+def bit_decoder(codes):
     revcodes = rev_dict(codes)
-    seq = list()
+    bits = list()
+
+    def push(bit):
+        bits.append(bit)
+        if len(bits) > 16:
+            raise SyntaxError('broken huffman code')
+        t = tuple(bits)
+        if t in revcodes:
+            bits.clear()
+            return revcodes[t]
+        return None
+    return push
+
+def byte_decoder(codes):
+    decoder = bit_decoder(codes)
+
+    def push(byte):
+        bits = byte_to_bits(byte)
+        for bit in bits:
+            ch = decoder(bit)
+            if ch is not None:
+                yield ch
+    return push
+
+
+def decode_iterator(data, codes, length):
+    decoder = bit_decoder(codes)
     bitdata = chain(*map(byte_to_bits, data))
     r = 0
     while r < length:
         bit = next(bitdata, None)
         if bit is None:
             return
-        seq.append(bit)
-        t = tuple(seq)
-        if t in revcodes:
-            yield revcodes[t]
-            seq.clear()
-            r += 1
+        ch = decoder(bit)
+        if not ch:
+            continue
+        r += 1
+        yield ch
 
 
 def decode_text(data, codes, length):
