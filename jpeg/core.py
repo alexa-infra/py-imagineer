@@ -1,4 +1,3 @@
-import sys
 import struct
 import math
 from array import array
@@ -8,6 +7,26 @@ from itertools import islice, repeat
 import huffman
 from .scan_decode import decode_baseline
 
+
+SOF, DHT, DAC, JPG, RST, SOI, EOI, SOS, DQT, DNL, DRI, DHP, EXP, APP, COM = tuple(range(15))
+
+marker_names = {
+    SOF: 'SOF',
+    DHT: 'DHT',
+    DAC: 'DAC',
+    JPG: 'JPG',
+    RST: 'RST',
+    SOI: 'SOI',
+    EOI: 'EOI',
+    SOS: 'SOS',
+    DQT: 'DQT',
+    DNL: 'DNL',
+    DRI: 'DRI',
+    DHP: 'DHP',
+    EXP: 'EXP',
+    APP: 'APP',
+    COM: 'COM',
+}
 
 class EOF(Exception):
     pass
@@ -34,7 +53,7 @@ def read_u16(f):
     data = safe_read(f, 2)
     return struct.unpack('>H', data)[0]
 
-def get_marker(f, throw=True):
+def get_marker_code(f, throw=True):
     m = read_u8(f)
     if m != 0xFF:
         if throw:
@@ -50,17 +69,16 @@ def read_block(f):
     data = safe_read(f, length)
     return BytesIO(data), length
 
-def DRI(self, marker):
+def parse_DRI(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
 
     if length < 2:
         raise SyntaxError('bad DRI block')
     self.restart_interval = read_u16(data)
 
-def DHT(self, marker):
+def parse_DHT(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
 
-    self.dht = True
     while data.tell() < length:
         q = read_u8(data)
         tc = (q >> 4) & 15
@@ -81,27 +99,27 @@ def DHT(self, marker):
             self.huffman_ac[th] = codes
 
 
-def DQT(self, marker):
+def parse_DQT(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
 
     while data.tell() < length:
         if length - data.tell() < 65:
             raise SyntaxError('bad quantization table size')
-        q = read_u8(data)
+        v = read_u8(data)
         qt = (v >> 4) & 15
         qc = (v     ) & 15
         if qt > 0:
             raise SyntaxError('only 8-bit quantization tables are supported')
         self.quantization[qc] = array('B', data.read(64))
 
-def DNL(self, marker):
+def parse_DNL(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
 
     if length < 2:
         raise SyntaxError('bad DNL block')
     self.dnl_num_lines = read_u16(data)
 
-def APP(self, marker):
+def parse_APP(self, marker, *args): # pylint: disable=unused-argument
     data, _ = read_block(self.fp)
 
     if marker == 0xFFE0:
@@ -124,29 +142,24 @@ def APP(self, marker):
 
         if header == b'Adobe\x00':
             self.adobe = True
-            version = data.read(1)
-            flag1 = data.read(2)
-            flag2 = data.read(2)
+            data.read(5)
             self.adobe_color_transform = read_u8(data)
 
-SOF_names = {
-    0xFFC0: 'Baseline',
-    0xFFC1: 'Extended sequential, Huffman',
-    0xFFC2: 'Progressive, Huffman',
-    0xFFC3: 'Lossless, Huffman',
-    # 0xFFC4 is DHT
-    0xFFC5: 'Differential sequential, Huffman',
-    0xFFC6: 'Differential progressive, Huffman',
-    0xFFC7: 'Differential loseless, Huffman',
-    # 0xFFC8 reserved for JPG Extensions
-    0xFFC9: 'Extended sequential, arithmetic',
-    0xFFCA: 'Progressive, arithmetic',
-    0xFFCB: 'Lossless, arithmetic',
-    # 0xFFCC is DAC
-    0xFFCD: 'Differential sequential, arithmetic',
-    0xFFCE: 'Differential progressive, arithmetic',
-    0xFFCF: 'Differential loseless, arithmetic',
-}
+SOF_all = (
+    0xFFC0,
+    0xFFC1,
+    0xFFC2,
+    0xFFC3,
+    0xFFC5,
+    0xFFC6,
+    0xFFC7,
+    0xFFC9,
+    0xFFCA,
+    0xFFCB,
+    0xFFCD,
+    0xFFCE,
+    0xFFCF,
+)
 
 # Hierarchical, storing multiple images of different sizes
 # nonexistent in the world, thus not supported
@@ -212,17 +225,7 @@ SOF_supported = (
     0xFFC2,
 )
 
-def SOF(self, marker):
-    self.sof = True
-
-    name = SOF_names[marker]
-    print('Found SOF {}'.format(name))
-    if marker in SOF_differential:
-        raise SyntaxError('Differential is not supported')
-    if marker in SOF_arithmetic:
-        raise SyntaxError('Arithmetic is not supported')
-    if marker in SOF_loseless:
-        raise SyntaxError('Loseless is not supported')
+def parse_SOF(self, marker, *args): # pylint: disable=unused-argument
 
     data, length = read_block(self.fp)
 
@@ -243,49 +246,19 @@ def SOF(self, marker):
 
     frame = self.frame = Frame(marker, w, h, cc)
 
-    for i in range(cc):
-        id, q, tq = struct.unpack('3B', data.read(3))
+    for _ in range(cc):
+        idx, q, tq = struct.unpack('3B', data.read(3))
         h = (q >> 4) & 15
         v = (q     ) & 15
-        comp = frame.add_component(id, h, v)
+        comp = frame.add_component(idx, h, v)
         comp.quantization = self.quantization[tq]
     frame.prepare()
 
-def DAC(self, marker):
-    """ Define arithmetic coding condition
-    """
+
+def parse_SOS(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
 
-    raise SyntaxError('DAC is not implemented')
-
-def DHP(self, marker):
-    """ Define hierarchical progression
-    """
-    data, length = read_block(self.fp)
-
-    raise SyntaxError('DHP is not implemented')
-
-def EXP(self, marker):
-    """ Expand reference component
-    """
-    data, length = read_block(self.fp)
-
-    raise SyntaxError('EXP is not implemented')
-
-
-def COM(self, marker):
-    read_block(self.fp)
-
-
-def SOS(self, marker):
-    self.sos = True
-    if not self.sof:
-        raise SyntaxError('No SOF before SOS')
     frame = self.frame
-    if frame.huffman and not self.dht:
-        raise SyntaxError('No DHT')
-
-    data, length = read_block(self.fp)
 
     n = read_u8(data)
     if length != n * 2 + 4 or n > 4:
@@ -294,85 +267,86 @@ def SOS(self, marker):
         raise SyntaxError('SOS bad length')
 
     components = []
-    for i in range(n):
-        id, c = struct.unpack('BB', data.read(2))
-        if id not in frame.components_ids:
+    for _ in range(n):
+        idx, c = struct.unpack('BB', data.read(2))
+        if idx not in frame.components_ids:
             raise SyntaxError('Bad component id')
-        comp = frame.components_ids[id]
+        comp = frame.components_ids[idx]
         dc_id = (c >> 4) & 15
         ac_id = (c     ) & 15
         comp.huffman_dc = self.huffman_dc[dc_id]
         comp.huffman_ac = self.huffman_ac[ac_id]
         components.append(comp)
 
+    # pylint: disable=unused-variable
     spectral_start = read_u8(data)
     spectral_end = read_u8(data)
     successive_approx = read_u8(data)
     successive_prev = (c >> 4) & 15
     successive      = (c     ) & 15
+    # pylint: enable=unused-variable
 
     decode_baseline(self, components)
 
+marker_map = {
+    0xFFC0: SOF, # SOF - Start of frame
+    0xFFC1: SOF,
+    0xFFC2: SOF,
+    0xFFC3: SOF,
+    0xFFC4: DHT, # DHT - Define huffman table
+    0xFFC5: SOF,
+    0xFFC6: SOF,
+    0xFFC7: SOF,
+    0xFFC8: JPG, # Reserved for extensions
+    0xFFC9: SOF,
+    0xFFCA: SOF,
+    0xFFCB: SOF,
+    0xFFCC: DAC, # DAC - Define arithmetic coding condition
+    0xFFCE: SOF,
+    0xFFCF: SOF,
 
-def SOI(self, marker):
-    raise SyntaxError('duplicate SOI')
+    0xFFD0: RST, # Restarts
+    0xFFD1: RST,
+    0xFFD2: RST,
+    0xFFD3: RST,
+    0xFFD4: RST,
+    0xFFD5: RST,
+    0xFFD6: RST,
+    0xFFD7: RST,
 
+    0xFFD8: SOI, # SOI - Start of image
+    0xFFD9: EOI, # EOI - End of image
+    0xFFDA: SOS, # SOS - Start of scan
+    0xFFDB: DQT, # DQT - Define quantization table
+    0xFFDC: DNL, # DNL - Define number of lines
+    0xFFDD: DRI, # DRI - Define restart interval
+    0xFFDE: DHP, # DHP - Define hierarchical progression
+    0xFFDF: EXP, # EXP - Expand reference component
 
-def EOI(self, marker):
-    self.eoi = True
+    0xFFE0: APP, # APP - Application marker
+    0xFFE1: APP,
+    0xFFE2: APP,
+    0xFFE3: APP,
+    0xFFE4: APP,
+    0xFFE5: APP,
+    0xFFE6: APP,
+    0xFFE7: APP,
+    0xFFE8: APP,
+    0xFFE9: APP,
+    0xFFEA: APP,
+    0xFFEB: APP,
+    0xFFEC: APP,
+    0xFFED: APP,
+    0xFFEE: APP,
+    0xFFEF: APP,
+    0xFFFE: COM, # COM - Comment
+}
 
+def parse_marker_code(marker):
 
-def RST(self, marker):
-    pass
-
-
-def parse_marker(marker):
-    #print('Found marker {0:X}'.format(marker))
-
-    if marker == 0xFFC4: # DHT - Define huffman table
-        return DHT
-
-    if marker == 0xFFCC: # DAC - Define arithmetic coding condition
-        return DAC
-
-    if 0xFFC0 <= marker <= 0xFFCF: # SOF - Start of frame
-        return SOF
-
-    if 0xFFD0 <= marker <= 0xFFD7: # Restarts
-        return RST
-
-    if marker == 0xFFD8: # SOI - Start of image
-        return SOI
-
-    if marker == 0xFFD9: # EOI - End of image
-        return EOI
-
-    if marker == 0xFFDA: # SOS - Start of scan
-        return SOS
-
-    #if 0xFFDB <= marker <= 0xFFDF:
-    if marker == 0xFFDB: # DQT - Define quantization table
-        return DQT
-
-    if marker == 0xFFDC: # DNL - Define number of lines
-        return DNL
-
-    if marker == 0xFFDD: # DRI - Define restart interval
-        return DRI
-
-    if marker == 0xFFDE: # DHP - Define hierarchical progression
-        return DHP
-
-    if marker == 0xFFDF: # EXP - Expand reference component
-        return EXP
-
-    if 0xFFE0 <= marker <= 0xFFEF: # APP
-        return APP
-
-    if marker == 0xFFFE: # COM - Comment
-        return COM
-
-    raise SyntaxError('unknown marker 0x{0:X}'.format(marker))
+    if marker not in marker_map:
+        raise BadMarker('unknown marker 0x{0:X}'.format(marker))
+    return marker_map[marker]
 
 class Component:
     def __init__(self, idx, h, v):
@@ -398,7 +372,7 @@ class Component:
         h2 = math.ceil(frame.h * v / frame.max_v)
         self.size = (w2, h2)
         buffer_size = w2 * h2
-        print('buffer_size', buffer_size // 1024, 'KB')
+        #print('buffer_size', buffer_size // 1024, 'KB')
         self.data = make_array('h', buffer_size)
 
 class Frame:
@@ -444,58 +418,83 @@ class JpegImage:
         self.adobe = None
         self.adobe_color_transform = None
 
-        self.sof = False
-        self.sos = False
-        self.eoi = False
-        self.dht = False
-
         self.frame = None
+        self.marker_codes = []
 
     def prescan(self):
+        self.marker_codes = marker_codes = []
+
         skip_till_marker = False
         while True:
             try:
                 if skip_till_marker:
-                    marker = None
-                    while marker is None or marker == 0xFF00:
-                        marker = get_marker(self.fp, throw=False)
+                    code = None
+                    while code is None or code == 0xFF00:
+                        code = get_marker_code(self.fp, throw=False)
                     skip_till_marker = False
                 else:
-                    marker = get_marker(self.fp)
+                    code = get_marker_code(self.fp)
 
-                handler = parse_marker(marker)
-                print('Marker 0x{0:X} {1}'.format(marker, handler))
+                marker = parse_marker_code(code)
+                pos = self.fp.tell()
+                marker_codes.append((code, marker, pos))
 
-                if handler not in (EOI, SOI, RST):
+                if marker not in (EOI, SOI, RST):
                     read_block(self.fp)
 
-                if handler is SOS:
+                if marker in (SOS, RST):
                     skip_till_marker = True
             except BadMarker:
                 print('Bad marker')
                 break
             except EOF:
-                print('EOF')
                 break
 
+        for code, marker, pos in marker_codes:
+            name = marker_names[marker]
+            print('Marker 0x{0:X} {1} {2}'.format(code, name, pos))
 
-    def read_exif(self):
-        marker = get_marker(self.fp)
-        handler = parse_marker(marker)
-        if handler is not SOI: # SOI - start of image
-            raise SyntaxError('no SOI')
+        markers = [m for c, m, p in marker_codes]
+        assert markers.count(SOI) == 1 and markers[0] == SOI
+        assert markers.count(EOI) == 1 and markers[-1] == EOI
 
-        while self.fp and not self.sos and not self.eoi:
-            marker = get_marker(self.fp)
-            handler = parse_marker(marker)
-            if handler is not None:
-                handler(self, marker)
+        assert markers.count(SOF) == 1
+        SOF_marker = next(c for c, m, p in marker_codes if m == SOF)
+        assert SOF_marker not in SOF_differential
+        assert SOF_marker not in SOF_loseless
+        assert SOF_marker not in SOF_arithmetic
 
-        if not self.sos:
-            raise SyntaxError('No SOS')
+        assert SOS in markers
 
+        if DRI in markers:
+            assert markers.count(DRI) == 1
+            assert RST in markers
 
-        if self.frame.huffman and not self.dht:
-            raise SyntaxError('No DHT')
+        assert DHT in markers
+        assert DQT in markers
 
+        assert DAC not in markers
+        assert DHP not in markers
+        assert EXP not in markers
+        assert JPG not in markers
+
+    def process(self):
+
+        def iter_markers(marker):
+            for c, m, p in self.marker_codes:
+                if m == marker:
+                    yield c, p
+
+        def process_marker(marker, parse_func):
+            for code, pos in iter_markers(marker):
+                self.fp.seek(pos)
+                parse_func(self, code)
+
+        process_marker(DHT, parse_DHT)
+        process_marker(DQT, parse_DQT)
+        process_marker(DRI, parse_DRI)
+        process_marker(DNL, parse_DNL)
+        process_marker(APP, parse_APP)
+        process_marker(SOF, parse_SOF)
         print('Good!', 'w h = {} {}'.format(self.frame.w, self.frame.h))
+        process_marker(SOS, parse_SOS)
