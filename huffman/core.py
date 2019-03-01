@@ -111,4 +111,9 @@ def check_huffman_table(codes):
         if bits not in revcodes:
             return False
         code += 1
+    for i, value in enumerate(codeslist):
+        size = len(value)
+        for value2 in codeslist[i+1:]:
+            if value == value2[:size]:
+                return False
     return True
