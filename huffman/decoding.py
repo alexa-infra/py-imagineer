@@ -14,6 +14,9 @@ def bit_decoder(codes):
     bits = list()
 
     def push(bit):
+        if bit is None:
+            bits.clear()
+            return None
         bits.append(bit)
         if len(bits) > 16:
             raise SyntaxError('broken huffman code')

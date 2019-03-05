@@ -32,14 +32,20 @@ def bit_reader(data):
         if not bits or bit_counter >= 8:
             byte = data.read(1)
             if not byte:
-                return
+                return # EOF
             byte = struct.unpack('B', byte)[0]
             if byte == 0xFF:
                 next_byte = data.read(1)
                 if not next_byte:
                     return
                 next_byte = struct.unpack('B', next_byte)[0]
-                if next_byte != 0x00:
+                if 0xD0 <= next_byte <= 0xD7:
+                    yield None # signals decoder to reset bit counter
+                    # TODO: reset DC
+                    continue
+                elif next_byte == 0x00:
+                    pass # 0xFF00 is encoded 0xFF
+                else:
                     raise SyntaxError('found 0xFF{0:X} marker'.format(next_byte))
             bits = byte_to_bits(byte)
             bit_counter = 0
@@ -108,10 +114,7 @@ def receive_and_extend(reader, length):
     return dc_table(n, length)
 
 def read_huffman(reader, decoder):
-    while True:
-        bit = next(reader, None)
-        if bit is None:
-            raise SyntaxError('bad huffman code')
+    for bit in reader:
         ch = decoder(bit)
         if ch is not None:
             return ch

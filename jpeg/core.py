@@ -391,6 +391,8 @@ class JpegImage:
         if DRI in markers:
             assert markers.count(DRI) == 1
             assert RST in markers
+        else:
+            assert RST not in markers
 
         assert DHT in markers
         assert DQT in markers
