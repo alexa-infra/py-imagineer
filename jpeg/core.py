@@ -35,6 +35,8 @@ class EOF(Exception):
 class BadMarker(Exception):
     pass
 
+high_low4 = lambda x: ((x >> 4) & 15, x & 15)
+
 def make_array(typecode, n):
     initializer = islice(repeat(0), n)
     return array(typecode, initializer)
@@ -61,7 +63,7 @@ def get_marker_code(f, throw=True):
             raise BadMarker()
         return None
     n = read_u8(f)
-    return m * 256 + n # (m << 8) | n
+    return (m << 8) | n
 
 def read_block(f):
     length = read_u16(f) - 2
@@ -81,9 +83,7 @@ def parse_DHT(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
 
     while data.tell() < length:
-        q = read_u8(data)
-        tc = q // 16 # q >> 4
-        th = q % 16 # q & 15
+        tc, th = high_low4(read_u8(data))
         if tc > 1 or th > 3:
             raise SyntaxError('bad DHT table')
         isDC = tc == 0
@@ -106,9 +106,7 @@ def parse_DQT(self, *args): # pylint: disable=unused-argument
     while data.tell() < length:
         if length - data.tell() < 65:
             raise SyntaxError('bad quantization table size')
-        v = read_u8(data)
-        qt = v // 16
-        qc = v % 16
+        qt, qc = high_low4(read_u8(data))
         if qt > 0:
             raise SyntaxError('only 8-bit quantization tables are supported')
         self.quantization[qc] = array('B', data.read(64))
@@ -170,12 +168,10 @@ def parse_SOF(self, marker, *args): # pylint: disable=unused-argument
 
     for _ in range(cc):
         idx, q, tq = struct.unpack('3B', data.read(3))
-        h = q // 16
-        v = q % 16
+        h, v = high_low4(q)
         comp = frame.add_component(idx, h, v)
         comp.quantization = self.quantization[tq]
     frame.prepare()
-
 
 def parse_SOS(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
@@ -194,8 +190,7 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
         if idx not in frame.components_ids:
             raise SyntaxError('Bad component id')
         comp = frame.components_ids[idx]
-        dc_id = c // 16
-        ac_id = c % 16
+        dc_id, ac_id = high_low4(c)
         comp.huffman_dc = self.huffman_dc[dc_id]
         comp.huffman_ac = self.huffman_ac[ac_id]
         components.append(comp)
@@ -203,9 +198,7 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
     # pylint: disable=unused-variable
     spectral_start = read_u8(data)
     spectral_end = read_u8(data)
-    successive_approx = read_u8(data)
-    successive_prev = c // 16
-    successive = c % 16
+    successive_prev, successive = high_low4(read_u8(data))
     # pylint: enable=unused-variable
 
     decode_baseline(self, components)
