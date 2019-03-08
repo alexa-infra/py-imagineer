@@ -435,3 +435,27 @@ class JpegImage:
         if self.frame.baseline or self.frame.extended:
             assert markers.count(SOS) == 1
         process_marker(SOS, parse_SOS)
+
+    def get_format(self):
+        n = len(self.frame.components)
+        if n == 3:
+            return 'YCbCr'
+        elif n == 1:
+            return 'L'
+        return None
+
+    def get_linearized_data(self):
+        frame = self.frame
+        n = len(frame.components)
+
+        r = make_array('B', frame.w * frame.h * n)
+        for row in range(frame.h):
+            for col in range(frame.w):
+                coord = row * frame.w + col
+                for idx, c in enumerate(frame.components):
+                    scalex, scaley = c.scale
+                    width, _ = c.size
+
+                    coord1 = (row // scalex) * width + (col // scaley)
+                    r[coord * n + idx] = c.data[coord1]
+        return r

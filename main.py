@@ -1,8 +1,6 @@
 import sys
 from jpeg import JpegImage
-from jpeg.core import make_array
 from PIL import Image
-from array import array
 
 
 def main(filename):
@@ -12,28 +10,15 @@ def main(filename):
         img.process()
 
         frame = img.frame
-        n = len(frame.components)
 
         print('Size:', frame.w, frame.h)
         for idx, c in enumerate(frame.components):
             print('Component sampling {}: {}'.format(idx, c.sampling))
 
-        r = make_array('B', frame.w * frame.h * n)
-        for row in range(frame.h):
-            for col in range(frame.w):
-                coord = row * frame.w + col
-                for idx, c in enumerate(frame.components):
-                    scalex, scaley = c.scale
-                    width, _ = c.size
+        data = img.get_linearized_data()
+        fmt = img.get_format()
 
-                    coord1 = (row // scalex) * width + (col // scaley)
-                    r[coord * n + idx] = c.data[coord1]
-        fmt = None
-        if n == 3:
-            fmt = 'YCbCr'
-        elif n == 1:
-            fmt = 'L'
-        dimg = Image.frombytes(fmt, (frame.w, frame.h), r.tobytes())
+        dimg = Image.frombytes(fmt, (frame.w, frame.h), data.tobytes())
         dimg.show()
 
 
