@@ -273,6 +273,7 @@ class Component:
     def __init__(self, idx, h, v):
         self.id = idx
         self.sampling = (h, v)
+        self.scale = (0, 0)
         self.quantization = None
         self.huffman_dc = None
         self.huffman_ac = None
@@ -289,6 +290,7 @@ class Component:
 
     def prepare(self, frame):
         h, v = self.sampling
+        self.scale = frame.max_h // h, frame.max_v // v
         w2 = math.ceil(frame.w * h / frame.max_h)
         h2 = math.ceil(frame.h * v / frame.max_v)
         self.size = (w2, h2)

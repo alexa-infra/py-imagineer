@@ -23,8 +23,7 @@ def main(filename):
             for col in range(frame.w):
                 coord = row * frame.w + col
                 for idx, c in enumerate(frame.components):
-                    h, v = c.sampling
-                    scalex, scaley = frame.max_h // h, frame.max_v // v
+                    scalex, scaley = c.scale
                     width, _ = c.size
 
                     coord1 = (row // scalex) * width + (col // scaley)
