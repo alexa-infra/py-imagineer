@@ -201,7 +201,7 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
     successive_prev, successive = high_low4(read_u8(data))
     # pylint: enable=unused-variable
 
-    decode_baseline(self, components)
+    frame.decode(self.fp, components)
 
 marker_map = {
     0xFFC0: SOF, # SOF - Start of frame
@@ -317,6 +317,14 @@ class Frame:
         for component in self.components:
             component.prepare(self)
 
+    def decode(self, fp, components):
+        if self.baseline:
+            decode_baseline(fp, self, components)
+        elif self.progressive:
+            assert False
+        elif self.sequential:
+            assert False
+
 class JpegImage:
 
     def __init__(self, fp):
@@ -397,6 +405,8 @@ class JpegImage:
 
     def process(self):
 
+        markers = [m for c, m, p in self.marker_codes]
+
         def iter_markers(marker):
             for c, m, p in self.marker_codes:
                 if m == marker:
@@ -413,5 +423,6 @@ class JpegImage:
         process_marker(DNL, parse_DNL)
         process_marker(APP, parse_APP)
         process_marker(SOF, parse_SOF)
-        print('Good!', 'w h = {} {}'.format(self.frame.w, self.frame.h))
+        if self.frame.baseline or self.frame.extended:
+            assert markers.count(SOS) == 1
         process_marker(SOS, parse_SOS)
