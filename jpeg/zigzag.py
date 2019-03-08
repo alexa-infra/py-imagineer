@@ -2,6 +2,7 @@ from itertools import repeat, chain
 
 
 # mapping from row-major 8x8 matrix to position in the zigzag stream
+# pylint: disable=bad-whitespace,bad-continuation
 zigzag = (
      0,  1,  5,  6, 14, 15, 27, 28,
      2,  4,  7, 13, 16, 26, 29, 42,
@@ -12,6 +13,7 @@ zigzag = (
     21, 34, 37, 47, 50, 56, 59, 61,
     35, 36, 48, 49, 57, 58, 62, 63,
 )
+# pylint: enable=bad-whitespace,bad-continuation
 
 def make_zigzag(n):
     z = list()
@@ -22,7 +24,7 @@ def make_zigzag(n):
     for i in range(0, n * n):
         z[y][x] = i
         if up:
-            if x + 1 < n and 0 <= y - 1:
+            if x + 1 < n and y - 1 >= 0:
                 x += 1
                 y -= 1
             else:
@@ -32,7 +34,7 @@ def make_zigzag(n):
                     y += 1
                 up = False
         else:
-            if 0 <= x - 1 and y + 1 < n:
+            if x - 1 >= 0 and y + 1 < n:
                 x -= 1
                 y += 1
             else:
@@ -54,6 +56,7 @@ def test_zigzag():
         assert zigzag[i] == v
 
 # mapping from the zigzag stream to position in the 8x8 row-major matrix
+# pylint: disable=bad-whitespace,bad-continuation
 dezigzag = (
      0,  1,  8, 16,  9,  2,  3, 10,
     17, 24, 32, 25, 18, 11,  4,  5,
@@ -64,6 +67,7 @@ dezigzag = (
     58, 59, 52, 45, 38, 31, 39, 46,
     53, 60, 61, 54, 47, 55, 62, 63,
 )
+# pylint: enable=bad-whitespace,bad-continuation
 
 def test_dezigzag():
     z = make_zigzag(8)

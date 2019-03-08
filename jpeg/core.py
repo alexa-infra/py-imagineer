@@ -164,7 +164,7 @@ def parse_SOF(self, marker, *args): # pylint: disable=unused-argument
         raise SyntaxError('only 8-bit is supported')
     if w == 0 or h == 0:
         raise SyntaxError('0 width or height')
-    if cc not in (1, 3, 4): # L, RGB, CMYK
+    if cc not in (1, 3, 4): # L, YCbCr, CMYK
         raise SyntaxError('bad component count')
     if length < 6 + 3 * cc:
         raise SyntaxError('bad SOF length')
@@ -331,7 +331,7 @@ class Frame:
             decode_baseline(fp, self, components)
         elif self.progressive:
             assert False
-        elif self.sequential:
+        elif self.extended:
             assert False
 
 class JpegImage:
@@ -440,7 +440,7 @@ class JpegImage:
         n = len(self.frame.components)
         if n == 3:
             return 'YCbCr'
-        elif n == 1:
+        if n == 1:
             return 'L'
         return None
 

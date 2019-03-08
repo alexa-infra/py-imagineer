@@ -1,4 +1,3 @@
-import math
 from io import BytesIO
 from array import array
 import struct
@@ -102,6 +101,7 @@ def read_huffman(reader, decoder):
         ch = decoder(bit)
         if ch is not None:
             return ch
+    return None
 
 def read_dc(reader, decoder):
     s = read_huffman(reader, decoder)
@@ -149,11 +149,11 @@ def read_baseline(reader, component, block_data, row, col):
         pos = dezigzag[z]
         block_data[pos] = ac * qt[pos]
     block_data = idct_2d(block_data)
-    w, h = component.size
+    width, _ = component.size
     for i in range(8):
         for j in range(8):
             c = 8 * i + j
-            data[(row * 8 + i) * w + (col * 8 + j)] = block_data[c]
+            data[(row * 8 + i) * width + (col * 8 + j)] = block_data[c]
 
 def decode_baseline(fp, frame, components):
     blocks_x = frame.w // (8 * frame.max_h)
