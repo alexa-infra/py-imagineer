@@ -2,12 +2,12 @@ import struct
 import math
 from array import array
 from io import BytesIO
-from itertools import islice, repeat
 
 import huffman
 from .scan_decode import decode_baseline
 from .zigzag import dezigzag
 from . import sof_types
+from .utils import high_low4, make_array
 
 
 SOF, DHT, DAC, JPG, RST, SOI, EOI, SOS, DQT, DNL, DRI, DHP, EXP, APP, COM = tuple(range(15))
@@ -35,12 +35,6 @@ class EOF(Exception):
 
 class BadMarker(Exception):
     pass
-
-high_low4 = lambda x: ((x >> 4) & 15, x & 15)
-
-def make_array(typecode, n):
-    initializer = islice(repeat(0), n)
-    return array(typecode, initializer)
 
 def safe_read(f, n):
     data = f.read(n)

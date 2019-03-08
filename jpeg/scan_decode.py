@@ -1,11 +1,10 @@
 from io import BytesIO
-from array import array
 import struct
-from itertools import repeat
 from huffman.decoding import bit_decoder
 from huffman.utils import byte_to_bits
 from .zigzag import dezigzag
 from .idct import idct_2d
+from .utils import high_low4, make_array
 
 
 def bit_reader(data):
@@ -121,8 +120,7 @@ def read_ac(reader, decoder):
     k = 1
     while k < 64:
         rs = read_huffman(reader, decoder)
-        r = (rs >> 4) & 15
-        s = (rs     ) & 15
+        r, s = high_low4(rs)
         if s == 0:
             if r < 15:
                 return
@@ -159,7 +157,7 @@ def decode_baseline(fp, frame, components):
     blocks_x = frame.w // (8 * frame.max_h)
     blocks_y = frame.h // (8 * frame.max_v)
     reader = bit_reader(fp)
-    tmp = array('h', repeat(0, 64))
+    tmp = make_array('h', 64)
     n = 0
     for row in range(blocks_y):
         for col in range(blocks_x):
