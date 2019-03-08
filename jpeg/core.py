@@ -206,6 +206,7 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
     successive_prev, successive = high_low4(read_u8(data))
     # pylint: enable=unused-variable
 
+    frame.restart_interval = self.restart_interval
     frame.decode(self.fp, components)
 
 marker_map = {
@@ -305,6 +306,7 @@ class Frame:
         self.num_components = cc
         self.components = []
         self.components_ids = {}
+        self.restart_interval = None
 
         self.max_h = 0
         self.max_v = 0

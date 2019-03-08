@@ -2,9 +2,11 @@ import math
 from io import BytesIO
 from array import array
 import struct
+from itertools import repeat
 from huffman.decoding import bit_decoder
 from huffman.utils import byte_to_bits
 from .zigzag import dezigzag
+from .idct import idct_2d
 
 
 def bit_reader(data):
@@ -24,7 +26,6 @@ def bit_reader(data):
                 next_byte = struct.unpack('B', next_byte)[0]
                 if 0xD0 <= next_byte <= 0xD7:
                     yield None # signals decoder to reset bit counter
-                    # TODO: reset DC
                     continue
                 elif next_byte == 0x00:
                     pass # 0xFF00 is encoded 0xFF
@@ -132,36 +133,45 @@ def read_ac(reader, decoder):
         yield k, value
         k += 1
 
-def read_baseline(reader, component, offset):
+def read_baseline(reader, component, block_data, row, col):
     dc_decoder = bit_decoder(component.huffman_dc)
     ac_decoder = bit_decoder(component.huffman_ac)
-    block_data = component.data
+    data = component.data
     qt = component.quantization
 
-    last_dc = component.last_dc
-
     dc = read_dc(reader, dc_decoder)
-    dc += last_dc
-    block_data[offset] *= qt[0]
+    dc += component.last_dc
+    component.last_dc = dc
+    for i in range(64):
+        block_data[i] = 0
+    block_data[0] = dc * qt[0]
     for z, ac in read_ac(reader, ac_decoder):
         pos = dezigzag[z]
         block_data[pos] = ac * qt[pos]
+    block_data = idct_2d(block_data)
+    w, h = component.size
+    for i in range(8):
+        for j in range(8):
+            c = 8 * i + j
+            data[(row * 8 + i) * w + (col * 8 + j)] = block_data[c]
 
-    component.last_dc = last_dc
-
-def decode_baseline(self, components):
-    frame = self.frame
-    w = frame.w // (8 * frame.max_h)
-    h = frame.h // (8 * frame.max_v)
-    reader = bit_reader(self.fp)
-    for row in range(h):
-        for col in range(w):
+def decode_baseline(fp, frame, components):
+    blocks_x = frame.w // (8 * frame.max_h)
+    blocks_y = frame.h // (8 * frame.max_v)
+    reader = bit_reader(fp)
+    tmp = array('h', repeat(0, 64))
+    n = 0
+    for row in range(blocks_y):
+        for col in range(blocks_x):
             for comp in components:
-                a, b = comp.sampling
-                w2 = math.ceil(w // 8 * a / frame.max_h)
-                for i in range(a):
-                    block_row = row * a + i
-                    for j in range(b):
-                        block_col = col * b + j
-                        offset = 64 * (w2 * block_row + block_col)
-                        read_baseline(reader, comp, offset)
+                h, v = comp.sampling
+                for i in range(h):
+                    for j in range(v):
+                        block_row = row * h + i
+                        block_col = col * v + j
+                        read_baseline(reader, comp, tmp, block_row,
+                                      block_col)
+            n += 1
+            if frame.restart_interval and n % frame.restart_interval == 0:
+                for c in components:
+                    c.last_dc = 0
