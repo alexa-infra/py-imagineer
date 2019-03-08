@@ -6,6 +6,7 @@ from itertools import islice, repeat
 
 import huffman
 from .scan_decode import decode_baseline
+from .zigzag import dezigzag
 from . import sof_types
 
 
@@ -109,7 +110,11 @@ def parse_DQT(self, *args): # pylint: disable=unused-argument
         qt, qc = high_low4(read_u8(data))
         if qt > 0:
             raise SyntaxError('only 8-bit quantization tables are supported')
-        self.quantization[qc] = array('B', data.read(64))
+        dqt = array('B', data.read(64))
+        self.quantization[qc] = dequant = make_array('B', 64)
+        for i in range(64):
+            z = dezigzag[i]
+            dequant[z] = dqt[i]
 
 def parse_DNL(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)

@@ -4,7 +4,7 @@ from array import array
 import struct
 from huffman.decoding import bit_decoder
 from huffman.utils import byte_to_bits
-from .zigzag import dezigzag as dctZigZag
+from .zigzag import dezigzag
 
 
 def bit_reader(data):
@@ -128,23 +128,24 @@ def read_ac(reader, decoder):
             k += 16
             continue
         k += r
-        offset = dctZigZag[k]
         value = receive_and_extend(reader, s)
-        yield offset, value
+        yield k, value
         k += 1
 
 def read_baseline(reader, component, offset):
     dc_decoder = bit_decoder(component.huffman_dc)
     ac_decoder = bit_decoder(component.huffman_ac)
     block_data = component.data
+    qt = component.quantization
 
     last_dc = component.last_dc
 
     dc = read_dc(reader, dc_decoder)
     dc += last_dc
-    block_data[offset] = last_dc = dc
+    block_data[offset] *= qt[0]
     for z, ac in read_ac(reader, ac_decoder):
-        block_data[offset + z] = ac
+        pos = dezigzag[z]
+        block_data[pos] = ac * qt[pos]
 
     component.last_dc = last_dc
 
@@ -164,4 +165,3 @@ def decode_baseline(self, components):
                         block_col = col * b + j
                         offset = 64 * (w2 * block_row + block_col)
                         read_baseline(reader, comp, offset)
-    marker = struct.unpack('BB', self.fp.read(2))
