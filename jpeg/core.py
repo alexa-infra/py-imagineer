@@ -277,11 +277,6 @@ class Component:
 
         self.last_dc = 0
 
-    @property
-    def mcu_size(self):
-        h, v = self.sampling
-        return h * 8, v * 8
-
     def prepare(self, frame):
         h, v = self.sampling
         self.scale = frame.max_h // h, frame.max_v // v

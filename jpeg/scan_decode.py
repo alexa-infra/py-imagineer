@@ -66,7 +66,7 @@ bias = [_bias(n) for n in range(16)]
 _bmask = lambda n: (1 << n) - 1
 bmask = [_bmask(n) for n in range(17)]
 
-def dc_table(n, length):
+def ext_table(n, length):
     """
     length=0                        -> 0
     length=1 0b0, 0b1               -> -1, 1
@@ -80,20 +80,20 @@ def dc_table(n, length):
         return n + bias[length]
     return n
 
-def test_dc_table():
-    assert dc_table(0, 0) == 0
-    assert dc_table(0b0, 1) == -1
-    assert dc_table(0b1, 1) == 1
-    assert dc_table(0b00, 2) == -3
-    assert dc_table(0b01, 2) == -2
-    assert dc_table(0b10, 2) == 2
-    assert dc_table(0b11, 2) == 3
-    assert dc_table(0b000, 3) == -7
-    assert dc_table(0b111, 3) == 7
+def test_ext_table():
+    assert ext_table(0, 0) == 0
+    assert ext_table(0b0, 1) == -1
+    assert ext_table(0b1, 1) == 1
+    assert ext_table(0b00, 2) == -3
+    assert ext_table(0b01, 2) == -2
+    assert ext_table(0b10, 2) == 2
+    assert ext_table(0b11, 2) == 3
+    assert ext_table(0b000, 3) == -7
+    assert ext_table(0b111, 3) == 7
 
 def receive_and_extend(reader, length):
     n = receive(reader, length)
-    return dc_table(n, length)
+    return ext_table(n, length)
 
 def read_huffman(reader, decoder):
     for bit in reader:
