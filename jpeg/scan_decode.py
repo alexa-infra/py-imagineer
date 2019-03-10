@@ -151,7 +151,7 @@ def read_baseline(reader, component, block_data, row, col):
     for i in range(8):
         for j in range(8):
             c = 8 * i + j
-            data[(row * 8 + i) * width + (col * 8 + j)] = block_data[c]
+            data[(row + i) * width + (col + j)] = block_data[c]
 
 def decode_baseline(fp, frame, components):
     blocks_x = frame.w // (8 * frame.max_h)
@@ -163,10 +163,10 @@ def decode_baseline(fp, frame, components):
         for col in range(blocks_x):
             for comp in components:
                 h, v = comp.sampling
-                for i in range(h):
-                    for j in range(v):
-                        block_row = row * h + i
-                        block_col = col * v + j
+                for i in range(v):
+                    for j in range(h):
+                        block_row = 8 * (row * v + i)
+                        block_col = 8 * (col * h + j)
                         read_baseline(reader, comp, tmp, block_row,
                                       block_col)
             n += 1
