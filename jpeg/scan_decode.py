@@ -118,12 +118,12 @@ def test_read_dc():
 
 def read_ac(reader, decoder):
     k = 1
-    while k < 64:
+    while k <= 63:
         rs = read_huffman(reader, decoder)
         r, s = high_low4(rs)
         if s == 0:
             if r < 15:
-                return
+                break
             k += 16
             continue
         k += r
@@ -131,27 +131,35 @@ def read_ac(reader, decoder):
         yield k, value
         k += 1
 
-def read_baseline(reader, component, block_data, row, col):
-    dc_decoder = bit_decoder(component.huffman_dc)
-    ac_decoder = bit_decoder(component.huffman_ac)
-    data = component.data
+def read_baseline(reader, component, block_data):
     qt = component.quantization
 
+    dc_decoder = bit_decoder(component.huffman_dc)
     dc = read_dc(reader, dc_decoder)
     dc += component.last_dc
     component.last_dc = dc
-    for i in range(64):
-        block_data[i] = 0
     block_data[0] = dc * qt[0]
+
+    ac_decoder = bit_decoder(component.huffman_ac)
     for z, ac in read_ac(reader, ac_decoder):
         pos = dezigzag[z]
         block_data[pos] = ac * qt[pos]
-    block_data = idct_2d(block_data)
-    width, _ = component.size
+
+    idct_2d(block_data)
+
+def get_block(data, block_data, row, col, width):
+    offset = row * width + col
     for i in range(8):
         for j in range(8):
             c = 8 * i + j
-            data[(row + i) * width + (col + j)] = block_data[c]
+            block_data[c] = data[offset + i * width + j]
+
+def set_block(data, block_data, row, col, width):
+    offset = row * width + col
+    for i in range(8):
+        for j in range(8):
+            c = 8 * i + j
+            data[offset + i * width + j] = block_data[c]
 
 def decode_baseline(fp, frame, components):
     blocks_x = frame.w // (8 * frame.max_h)
@@ -159,16 +167,19 @@ def decode_baseline(fp, frame, components):
     reader = bit_reader(fp)
     tmp = make_array('h', 64)
     n = 0
-    for row in range(blocks_y):
-        for col in range(blocks_x):
+    for block_row in range(blocks_y):
+        for block_col in range(blocks_x):
             for comp in components:
+                data = comp.data
                 h, v = comp.sampling
+                w, _ = comp.size
                 for i in range(v):
                     for j in range(h):
-                        block_row = 8 * (row * v + i)
-                        block_col = 8 * (col * h + j)
-                        read_baseline(reader, comp, tmp, block_row,
-                                      block_col)
+                        row = 8 * (block_row * v + i)
+                        col = 8 * (block_col * h + j)
+                        get_block(data, tmp, row, col, w)
+                        read_baseline(reader, comp, tmp)
+                        set_block(data, tmp, row, col, w)
             n += 1
             if frame.restart_interval and n % frame.restart_interval == 0:
                 for c in components:
