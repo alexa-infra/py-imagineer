@@ -102,9 +102,12 @@ def read_huffman(reader, decoder):
             return ch
     return None
 
-def read_dc(reader, decoder):
+def read_dc(reader, decoder, scan):
     s = read_huffman(reader, decoder)
-    return receive_and_extend(reader, s)
+    value = receive_and_extend(reader, s)
+    if scan.approx_low:
+        value = value << scan.approx_low
+    return value
 
 def test_read_dc():
     hh = {
@@ -116,9 +119,9 @@ def test_read_dc():
     value = read_dc(reader, decoder)
     assert value == -512
 
-def read_ac(reader, decoder):
-    k = 1
-    while k <= 63:
+def read_ac(reader, decoder, scan):
+    k = 1 if scan.spectral_start == 0 else scan.spectral_start
+    while k <= scan.spectral_end:
         rs = read_huffman(reader, decoder)
         r, s = high_low4(rs)
         if s == 0:
@@ -128,20 +131,22 @@ def read_ac(reader, decoder):
             continue
         k += r
         value = receive_and_extend(reader, s)
+        if scan.approx_low:
+            value = value << scan.approx_low
         yield k, value
         k += 1
 
-def read_baseline(reader, component, block_data):
+def read_baseline(reader, component, block_data, scan):
     qt = component.quantization
 
     dc_decoder = bit_decoder(component.huffman_dc)
-    dc = read_dc(reader, dc_decoder)
+    dc = read_dc(reader, dc_decoder, scan)
     dc += component.last_dc
     component.last_dc = dc
     block_data[0] = dc * qt[0]
 
     ac_decoder = bit_decoder(component.huffman_ac)
-    for z, ac in read_ac(reader, ac_decoder):
+    for z, ac in read_ac(reader, ac_decoder, scan):
         pos = dezigzag[z]
         block_data[pos] = ac * qt[pos]
 
@@ -161,12 +166,13 @@ def set_block(data, block_data, row, col, width):
             c = 8 * i + j
             data[offset + i * width + j] = block_data[c]
 
-def decode_baseline(fp, frame, components):
+def decode_baseline(fp, frame, scan):
     blocks_x = frame.w // (8 * frame.max_h)
     blocks_y = frame.h // (8 * frame.max_v)
     reader = bit_reader(fp)
     tmp = make_array('h', 64)
     n = 0
+    components = scan.components
     for block_row in range(blocks_y):
         for block_col in range(blocks_x):
             for comp in components:
@@ -178,7 +184,7 @@ def decode_baseline(fp, frame, components):
                         row = 8 * (block_row * v + i)
                         col = 8 * (block_col * h + j)
                         get_block(data, tmp, row, col, w)
-                        read_baseline(reader, comp, tmp)
+                        read_baseline(reader, comp, tmp, scan)
                         set_block(data, tmp, row, col, w)
             n += 1
             if frame.restart_interval and n % frame.restart_interval == 0:

@@ -173,13 +173,12 @@ def parse_SOF(self, marker, *args): # pylint: disable=unused-argument
     frame.prepare()
 
 class Scan:
-    def __init__(self, spectral_start, spectral_end, successive):
-        self.components = None
-        self.spectral_start = spectral_start
-        self.spectral_end = spectral_end
-        successive_high, successive_low = high_low4(successive)
-        self.successive_high = successive_high
-        self.successive_low = successive_low
+    def __init__(self):
+        self.components = []
+        self.spectral_start = 0
+        self.spectral_end = 0
+        self.approx_high = 0
+        self.approx_low = 0
 
 def parse_SOS(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
@@ -192,7 +191,7 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
     if n == 0 and not frame.progressive:
         raise SyntaxError('SOS bad length')
 
-    components = []
+    scan = Scan()
     for _ in range(n):
         idx, c = struct.unpack('BB', data.read(2))
         if idx not in frame.components_ids:
@@ -202,13 +201,16 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
         # progressive scan might have no AC
         comp.huffman_dc = self.huffman_dc.get(dc_id)
         comp.huffman_ac = self.huffman_ac.get(ac_id)
-        components.append(comp)
+        scan.components.append(comp)
 
-    spectral_start = read_u8(data)
-    spectral_end = read_u8(data)
-    successive = read_u8(data)
-    scan = Scan(spectral_start, spectral_end, successive)
-    scan.components = components
+    scan.spectral_start = read_u8(data)
+    scan.spectral_end = read_u8(data)
+    scan.approx_high, scan.approx_low = high_low4(read_u8(data))
+    if not frame.progressive:
+        assert scan.spectral_start == 0
+        assert scan.spectral_end == 63
+        assert scan.approx_high == 0
+        assert scan.approx_low == 0
 
     frame.restart_interval = self.restart_interval
     frame.decode(self.fp, scan)
@@ -337,7 +339,7 @@ class Frame:
 
     def decode(self, fp, scan):
         if self.baseline:
-            decode_baseline(fp, self, scan.components)
+            decode_baseline(fp, self, scan)
         elif self.progressive:
             assert False
         elif self.extended:
