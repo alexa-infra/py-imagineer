@@ -4,7 +4,7 @@ from array import array
 from io import BytesIO
 
 import huffman
-from .scan_decode import decode_baseline
+from .scan_decode import decode, decode_finish
 from .zigzag import dezigzag
 from . import sof_types
 from .utils import high_low4, make_array
@@ -213,7 +213,8 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
         assert scan.approx_low == 0
 
     frame.restart_interval = self.restart_interval
-    frame.decode(self.fp, scan)
+    decode(self.fp, frame, scan)
+
 
 marker_map = {
     0xFFC0: SOF, # SOF - Start of frame
@@ -309,6 +310,12 @@ class Component:
         #print('buffer_size', buffer_size // 1024, 'KB')
         self.data = make_array('h', buffer_size)
 
+class ProgState:
+    def __init__(self):
+        self.eobrun = 0
+        self.ac_state = 0
+        self.ac_next_value = 0
+
 class Frame:
     def __init__(self, marker, w, h, cc):
         self.baseline = marker in sof_types.baseline
@@ -324,6 +331,11 @@ class Frame:
         self.max_h = 0
         self.max_v = 0
 
+        if self.progressive:
+            self.prog_state = ProgState()
+        else:
+            self.prog_state = None
+
     def add_component(self, idx, h, v):
         assert len(self.components) + 1 <= self.num_components
         comp = Component(idx, h, v)
@@ -336,14 +348,6 @@ class Frame:
     def prepare(self):
         for component in self.components:
             component.prepare(self)
-
-    def decode(self, fp, scan):
-        if self.baseline:
-            decode_baseline(fp, self, scan)
-        elif self.progressive:
-            assert False
-        elif self.extended:
-            assert False
 
 class JpegImage:
 
@@ -442,6 +446,8 @@ class JpegImage:
                 continue
             self.fp.seek(pos)
             parser(self, code)
+
+        decode_finish(self.frame)
 
     def get_format(self):
         n = len(self.frame.components)

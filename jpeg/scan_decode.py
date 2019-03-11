@@ -120,8 +120,8 @@ def test_read_dc():
     assert value == -512
 
 def read_ac(reader, decoder, scan):
-    k = 1 if scan.spectral_start == 0 else scan.spectral_start
-    while k <= scan.spectral_end:
+    k = 1
+    while k <= 63:
         rs = read_huffman(reader, decoder)
         r, s = high_low4(rs)
         if s == 0:
@@ -131,10 +131,70 @@ def read_ac(reader, decoder, scan):
             continue
         k += r
         value = receive_and_extend(reader, s)
-        if scan.approx_low:
-            value = value << scan.approx_low
         yield k, value
         k += 1
+
+def read_ac_prog_first(state, reader, decoder, scan, block_data):
+    if state.eobrun > 0:
+        state.eobrun -= 1
+        return
+    k = scan.spectral_start
+    while k <= scan.spectral_end:
+        rs = read_huffman(reader, decoder)
+        r, s = high_low4(rs)
+        if s == 0:
+            if r < 15:
+                state.eobrun = receive(reader, r) + (1 << r) - 1
+                break
+            k += 16
+            continue
+        k += r
+        value = receive_and_extend(reader, s)
+        if scan.approx_low:
+            value *= (1 << scan.approx_low)
+        z = dezigzag[k]
+        block_data[z] = value
+        k += 1
+
+def read_ac_prog_successive(state, reader, decoder, scan, block_data):
+    if state.eobrun > 0:
+        state.eobrun -= 1
+        return
+    k = scan.spectral_start
+    while k <= scan.spectral_end:
+        z = dezigzag[k]
+        sign = -1 if block_data[z] < 0 else 1
+        if state.ac_state == 0:
+            rs = read_huffman(reader, decoder)
+            r, s = high_low4(rs)
+            if s == 0:
+                if r < 15:
+                    state.eobrun = receive(reader, r) + (1 << r) - 1
+                    state.ac_state = 4
+                else:
+                    r = 16
+                    state.ac_state = 1
+            elif s == 1:
+                state.ac_next_value = receive_and_extend(reader, s)
+                state.ac_state = 2 if r else 3
+            continue
+        elif block_data[z]:
+            value = next(reader) << scan.approx_low
+            block_data[z] += sign * value
+        elif state.ac_state == 1 or state.ac_state == 2:
+            r -= 1
+            if r == 0:
+                state.ac_state = 3 if state.ac_state == 2 else 0
+        elif state.ac_state == 3:
+            block_data[z] = state.ac_next_value << scan.approx_low
+            state.ac_state = 0
+        elif state.ac_state == 4:
+            pass
+        k += 1
+    if state.ac_state == 4:
+        state.eobrun -= 1
+        if state.eobrun == 0:
+            state.ac_state = 0
 
 def read_baseline(reader, component, block_data, scan):
     qt = component.quantization
@@ -152,6 +212,25 @@ def read_baseline(reader, component, block_data, scan):
 
     idct_2d(block_data)
 
+def read_dc_prog(reader, component, block_data, scan):
+    if scan.approx_high == 0:
+        dc_decoder = bit_decoder(component.huffman_dc)
+        dc = read_dc(reader, dc_decoder, scan)
+        dc += component.last_dc
+        component.last_dc = dc
+        block_data[0] = dc
+    else:
+        bit = next(reader)
+        value = bit << scan.approx_low
+        block_data[0] |= value
+
+def read_ac_prog(state, reader, component, block_data, scan):
+    ac_decoder = bit_decoder(component.huffman_ac)
+    if scan.approx_high == 0:
+        read_ac_prog_first(state, reader, ac_decoder, scan, block_data)
+    else:
+        read_ac_prog_successive(state, reader, ac_decoder, scan, block_data)
+
 def get_block(data, block_data, row, col, width):
     offset = row * width + col
     for i in range(8):
@@ -166,11 +245,20 @@ def set_block(data, block_data, row, col, width):
             c = 8 * i + j
             data[offset + i * width + j] = block_data[c]
 
-def decode_baseline(fp, frame, scan):
+def decode(fp, frame, scan):
     blocks_x = frame.w // (8 * frame.max_h)
     blocks_y = frame.h // (8 * frame.max_v)
     reader = bit_reader(fp)
     tmp = make_array('h', 64)
+
+    if frame.progressive:
+        if scan.spectral_start == 0:
+            decode_fn = read_dc_prog
+        else:
+            decode_fn = lambda r, c, d, s: read_ac_prog(frame.prog_state, r, c, d, s)
+    else:
+        decode_fn = read_baseline
+
     n = 0
     components = scan.components
     for block_row in range(blocks_y):
@@ -179,14 +267,37 @@ def decode_baseline(fp, frame, scan):
                 data = comp.data
                 h, v = comp.sampling
                 w, _ = comp.size
+
                 for i in range(v):
+                    row = 8 * (block_row * v + i)
                     for j in range(h):
-                        row = 8 * (block_row * v + i)
                         col = 8 * (block_col * h + j)
+
                         get_block(data, tmp, row, col, w)
-                        read_baseline(reader, comp, tmp, scan)
+                        decode_fn(reader, comp, tmp, scan)
                         set_block(data, tmp, row, col, w)
             n += 1
             if frame.restart_interval and n % frame.restart_interval == 0:
                 for c in components:
                     c.last_dc = 0
+
+def decode_prog_block_finish(component, block_data):
+    qt = component.quantization
+    for i in range(8):
+        for j in range(8):
+            c = 8 * i + j
+            block_data[c] *= qt[c]
+    idct_2d(block_data)
+
+def decode_finish(frame):
+    if not frame.progressive:
+        return
+    tmp = make_array('h', 64)
+    for comp in frame.components:
+        data = comp.data
+        w, h = comp.size
+        for row in range(0, h, 8):
+            for col in range(0, w, 8):
+                get_block(data, tmp, row, col, w)
+                decode_prog_block_finish(comp, tmp)
+                set_block(data, tmp, row, col, w)
