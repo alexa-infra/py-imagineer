@@ -172,6 +172,15 @@ def parse_SOF(self, marker, *args): # pylint: disable=unused-argument
         comp.quantization = self.quantization[tq]
     frame.prepare()
 
+class Scan:
+    def __init__(self, spectral_start, spectral_end, successive):
+        self.components = None
+        self.spectral_start = spectral_start
+        self.spectral_end = spectral_end
+        successive_high, successive_low = high_low4(successive)
+        self.successive_high = successive_high
+        self.successive_low = successive_low
+
 def parse_SOS(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
 
@@ -190,18 +199,19 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
             raise SyntaxError('Bad component id')
         comp = frame.components_ids[idx]
         dc_id, ac_id = high_low4(c)
-        comp.huffman_dc = self.huffman_dc[dc_id]
-        comp.huffman_ac = self.huffman_ac[ac_id]
+        # progressive scan might have no AC
+        comp.huffman_dc = self.huffman_dc.get(dc_id)
+        comp.huffman_ac = self.huffman_ac.get(ac_id)
         components.append(comp)
 
-    # pylint: disable=unused-variable
     spectral_start = read_u8(data)
     spectral_end = read_u8(data)
-    successive_prev, successive = high_low4(read_u8(data))
-    # pylint: enable=unused-variable
+    successive = read_u8(data)
+    scan = Scan(spectral_start, spectral_end, successive)
+    scan.components = components
 
     frame.restart_interval = self.restart_interval
-    frame.decode(self.fp, components)
+    frame.decode(self.fp, scan)
 
 marker_map = {
     0xFFC0: SOF, # SOF - Start of frame
@@ -263,6 +273,16 @@ def parse_marker_code(marker):
         raise BadMarker('unknown marker 0x{0:X}'.format(marker))
     return marker_map[marker]
 
+parsers = {
+    DHT: parse_DHT,
+    DQT: parse_DQT,
+    DRI: parse_DRI,
+    DNL: parse_DNL,
+    APP: parse_APP,
+    SOF: parse_SOF,
+    SOS: parse_SOS,
+}
+
 class Component:
     def __init__(self, idx, h, v):
         self.id = idx
@@ -315,9 +335,9 @@ class Frame:
         for component in self.components:
             component.prepare(self)
 
-    def decode(self, fp, components):
+    def decode(self, fp, scan):
         if self.baseline:
-            decode_baseline(fp, self, components)
+            decode_baseline(fp, self, scan.components)
         elif self.progressive:
             assert False
         elif self.extended:
@@ -385,16 +405,28 @@ class JpegImage:
         assert SOF_marker not in sof_types.loseless
         assert SOF_marker not in sof_types.arithmetic
 
-        assert SOS in markers
+        progressive = SOF_marker in sof_types.progressive
+
+        if progressive:
+            assert markers.count(SOS) >= 1
+        else:
+            assert markers.count(SOS) == 1
+        SOS_position = markers.index(SOS)
+        assert SOF in markers[:SOS_position]
+        assert APP in markers[:SOS_position]
 
         if DRI in markers:
             assert markers.count(DRI) == 1
             assert RST in markers
+            assert RST not in markers[:SOS_position]
         else:
             assert RST not in markers
 
         assert DHT in markers
         assert DQT in markers
+        if not progressive:
+            assert DQT not in markers[SOS_position:]
+            assert DHT not in markers[SOS_position:]
 
         assert DAC not in markers
         assert DHP not in markers
@@ -402,28 +434,12 @@ class JpegImage:
         assert JPG not in markers
 
     def process(self):
-
-        markers = [m for c, m, p in self.marker_codes]
-
-        def iter_markers(marker):
-            for c, m, p in self.marker_codes:
-                if m == marker:
-                    yield c, p
-
-        def process_marker(marker, parse_func):
-            for code, pos in iter_markers(marker):
-                self.fp.seek(pos)
-                parse_func(self, code)
-
-        process_marker(DHT, parse_DHT)
-        process_marker(DQT, parse_DQT)
-        process_marker(DRI, parse_DRI)
-        process_marker(DNL, parse_DNL)
-        process_marker(APP, parse_APP)
-        process_marker(SOF, parse_SOF)
-        if self.frame.baseline or self.frame.extended:
-            assert markers.count(SOS) == 1
-        process_marker(SOS, parse_SOS)
+        for code, marker, pos in self.marker_codes:
+            parser = parsers.get(marker)
+            if not parser:
+                continue
+            self.fp.seek(pos)
+            parser(self, code)
 
     def get_format(self):
         n = len(self.frame.components)
