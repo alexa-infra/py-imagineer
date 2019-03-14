@@ -197,20 +197,16 @@ def read_ac_prog_successive(state, reader, decoder, scan, block_data):
             state.ac_state = 0
 
 def read_baseline(reader, component, block_data, scan):
-    qt = component.quantization
-
     dc_decoder = bit_decoder(component.huffman_dc)
     dc = read_dc(reader, dc_decoder, scan)
     dc += component.last_dc
     component.last_dc = dc
-    block_data[0] = dc * qt[0]
+    block_data[0] = dc
 
     ac_decoder = bit_decoder(component.huffman_ac)
     for z, ac in read_ac(reader, ac_decoder, scan):
         pos = dezigzag[z]
-        block_data[pos] = ac * qt[pos]
-
-    idct_2d(block_data)
+        block_data[pos] = ac
 
 def read_dc_prog(reader, component, block_data, scan):
     if scan.approx_high == 0:
@@ -290,8 +286,6 @@ def decode_prog_block_finish(component, block_data):
     idct_2d(block_data)
 
 def decode_finish(frame):
-    if not frame.progressive:
-        return
     tmp = make_array('h', 64)
     for comp in frame.components:
         data = comp.data
