@@ -256,28 +256,47 @@ def iter_block_samples(component, row, col):
             yield blocks[sub_row * w + sub_col]
 
 def decode(fp, frame, scan):
-    blocks_x, blocks_y = frame.blocks_size
     reader = bit_reader(fp)
+    components = scan.components
 
     if frame.progressive:
         if scan.spectral_start == 0:
             decode_fn = read_dc_prog
         else:
             decode_fn = read_ac_prog
+            assert len(components) == 1
     else:
         decode_fn = read_baseline
 
+    for comp in components:
+        if comp.prog_state:
+            comp.prog_state.eobrun = 0
+
     n = 0
-    components = scan.components
-    for block_row in range(blocks_y):
-        for block_col in range(blocks_x):
-            for comp in components:
-                for block in iter_block_samples(comp, block_row, block_col):
-                    decode_fn(reader, comp, block, scan)
-            n += 1
-            if frame.restart_interval and n % frame.restart_interval == 0:
-                for c in components:
-                    c.last_dc = 0
+    if len(components) == 1:
+        # non-interleaved
+        component = components[0]
+        blocks = component.blocks
+        blocks_x, blocks_y = component.blocks_size
+        for block_row in range(blocks_y):
+            for block_col in range(blocks_x):
+                block = blocks[block_row * blocks_x + block_col]
+                decode_fn(reader, component, block, scan)
+                n += 1
+                if frame.restart_interval and n % frame.restart_interval == 0:
+                    component.last_dc = 0
+    else:
+        # interleaved
+        blocks_x, blocks_y = frame.blocks_size
+        for block_row in range(blocks_y):
+            for block_col in range(blocks_x):
+                for comp in components:
+                    for block in iter_block_samples(comp, block_row, block_col):
+                        decode_fn(reader, comp, block, scan)
+                n += 1
+                if frame.restart_interval and n % frame.restart_interval == 0:
+                    for c in components:
+                        c.last_dc = 0
 
 def decode_prog_block_finish(component, block_data):
     qt = component.quantization
