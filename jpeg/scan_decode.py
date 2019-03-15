@@ -1,3 +1,4 @@
+import math
 from io import BytesIO
 import struct
 from huffman.decoding import bit_decoder
@@ -227,13 +228,6 @@ def read_ac_prog(state, reader, component, block_data, scan):
     else:
         read_ac_prog_successive(state, reader, ac_decoder, scan, block_data)
 
-def get_block(data, block_data, row, col, width):
-    offset = row * width + col
-    for i in range(8):
-        for j in range(8):
-            c = 8 * i + j
-            block_data[c] = data[offset + i * width + j]
-
 def set_block(data, block_data, row, col, width):
     offset = row * width + col
     for i in range(8):
@@ -241,11 +235,20 @@ def set_block(data, block_data, row, col, width):
             c = 8 * i + j
             data[offset + i * width + j] = block_data[c]
 
+def iter_block_samples(component, row, col):
+    h, v = component.sampling
+    w, _ = component.blocks_size
+    blocks = component.blocks
+
+    for i in range(v):
+        sub_row = row * v + i
+        for j in range(h):
+            sub_col = col * h + j
+            yield blocks[sub_row * w + sub_col]
+
 def decode(fp, frame, scan):
-    blocks_x = frame.w // (8 * frame.max_h)
-    blocks_y = frame.h // (8 * frame.max_v)
+    blocks_x, blocks_y = frame.blocks_size
     reader = bit_reader(fp)
-    tmp = make_array('h', 64)
 
     if frame.progressive:
         if scan.spectral_start == 0:
@@ -260,18 +263,8 @@ def decode(fp, frame, scan):
     for block_row in range(blocks_y):
         for block_col in range(blocks_x):
             for comp in components:
-                data = comp.data
-                h, v = comp.sampling
-                w, _ = comp.size
-
-                for i in range(v):
-                    row = 8 * (block_row * v + i)
-                    for j in range(h):
-                        col = 8 * (block_col * h + j)
-
-                        get_block(data, tmp, row, col, w)
-                        decode_fn(reader, comp, tmp, scan)
-                        set_block(data, tmp, row, col, w)
+                for block in iter_block_samples(comp, block_row, block_col):
+                    decode_fn(reader, comp, block, scan)
             n += 1
             if frame.restart_interval and n % frame.restart_interval == 0:
                 for c in components:
@@ -279,19 +272,17 @@ def decode(fp, frame, scan):
 
 def decode_prog_block_finish(component, block_data):
     qt = component.quantization
-    for i in range(8):
-        for j in range(8):
-            c = 8 * i + j
-            block_data[c] *= qt[c]
+    for c in range(64):
+        block_data[c] *= qt[c]
     idct_2d(block_data)
 
 def decode_finish(frame):
-    tmp = make_array('h', 64)
     for comp in frame.components:
         data = comp.data
-        w, h = comp.size
-        for row in range(0, h, 8):
-            for col in range(0, w, 8):
-                get_block(data, tmp, row, col, w)
-                decode_prog_block_finish(comp, tmp)
-                set_block(data, tmp, row, col, w)
+        blocks = comp.blocks
+        w, h = comp.blocks_size
+        for row in range(h):
+            for col in range(w):
+                block = blocks[row * w + col]
+                decode_prog_block_finish(comp, block)
+                set_block(data, block, row * 8, col * 8, w * 8)

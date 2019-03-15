@@ -297,18 +297,23 @@ class Component:
 
         self.size = (0, 0) # effective pixels, non-iterleaved MCU
         self.data = None
+        self.blocks = None
 
         self.last_dc = 0
 
     def prepare(self, frame):
         h, v = self.sampling
-        self.scale = frame.max_h // h, frame.max_v // v
+        self.scale = (frame.max_h // h, frame.max_v // v)
+
         w2 = math.ceil(frame.w * h / frame.max_h)
         h2 = math.ceil(frame.h * v / frame.max_v)
         self.size = (w2, h2)
-        buffer_size = w2 * h2
-        #print('buffer_size', buffer_size // 1024, 'KB')
-        self.data = make_array('h', buffer_size)
+        self.data = make_array('h', w2 * h2)
+
+        width = math.ceil(w2 / 8)
+        height = math.ceil(h2 / 8)
+        self.blocks_size = (width, height)
+        self.blocks = [make_array('h', 64) for _ in range(width * height)]
 
 class ProgState:
     def __init__(self):
@@ -346,6 +351,9 @@ class Frame:
         return comp
 
     def prepare(self):
+        blocks_x = math.ceil(self.w / (8 * self.max_h))
+        blocks_y = math.ceil(self.h / (8 * self.max_v))
+        self.blocks_size = blocks_x, blocks_y
         for component in self.components:
             component.prepare(self)
 
