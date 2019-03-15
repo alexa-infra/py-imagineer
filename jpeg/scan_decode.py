@@ -130,7 +130,8 @@ def read_ac(reader, decoder, scan):
             continue
         k += r
         value = receive_and_extend(reader, s)
-        yield k, value
+        z = dezigzag[k]
+        yield z, value
         k += 1
 
 def read_ac_prog_first(state, reader, decoder, scan, block_data):
@@ -203,8 +204,7 @@ def read_baseline(reader, component, block_data, scan):
     block_data[0] = dc
 
     ac_decoder = bit_decoder(component.huffman_ac)
-    for z, ac in read_ac(reader, ac_decoder, scan):
-        pos = dezigzag[z]
+    for pos, ac in read_ac(reader, ac_decoder, scan):
         block_data[pos] = ac
 
 def read_dc_prog(reader, component, block_data, scan):
