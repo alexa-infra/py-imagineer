@@ -96,6 +96,33 @@ def receive_and_extend(reader, length):
     n = receive(reader, length)
     return ext_table(n, length)
 
+def ext_table_pos(n, length):
+    """
+    Table G.1. - EOBn code run length extensions
+    length=0                        -> 0
+    length=1 0b0, 0b1               -> 1, 2
+    length=2 0b00, 0b01, 0b10, 0b11 -> 3, 4, 5, 6
+    length=3 0b000, ..., 0b111      -> 7, 8, 9, 10, 11, 12, 13, 14
+    ....
+    """
+    if length == 0:
+        return 0
+    return n + bmask[length]
+
+def test_ext_table_pos():
+    assert ext_table_pos(0, 0) == 0
+    assert ext_table_pos(0b0, 1) == 1
+    assert ext_table_pos(0b1, 1) == 2
+    assert ext_table_pos(0b00, 2) == 3
+    assert ext_table_pos(0b01, 2) == 4
+    assert ext_table_pos(0b10, 2) == 5
+    assert ext_table_pos(0b000, 3) == 7
+    assert ext_table_pos(0b111, 3) == 14
+
+def receive_and_extend_pos(reader, length):
+    n = receive(reader, length)
+    return ext_table_pos(n, length)
+
 def read_huffman(reader, decoder):
     for bit in reader:
         ch = decoder(bit)
@@ -115,7 +142,7 @@ def test_read_dc():
     decoder = bit_decoder(hh)
     b = BytesIO(b'\xfc\xff\x00\xe2\xaf')
     reader = bit_reader(b)
-    value = read_dc(reader, decoder)
+    value = read_dc(reader, decoder, None)
     assert value == -512
 
 def read_ac(reader, decoder, scan):
@@ -126,16 +153,17 @@ def read_ac(reader, decoder, scan):
         if s == 0:
             if r < 15:
                 break
-            k += 16
-            continue
-        k += r
-        value = receive_and_extend(reader, s)
-        z = dezigzag[k]
-        yield z, value
+            k += 15
+        else:
+            k += r
+            value = receive_and_extend(reader, s)
+            z = dezigzag[k]
+            yield z, value
         k += 1
 
 def read_ac_prog_first(state, reader, decoder, scan, block_data):
     if state.eobrun > 0:
+        # G.1.2.2 - this AC block contains all zeros
         state.eobrun -= 1
         return
     k = scan.spectral_start
@@ -144,16 +172,19 @@ def read_ac_prog_first(state, reader, decoder, scan, block_data):
         r, s = high_low4(rs)
         if s == 0:
             if r < 15:
-                state.eobrun = receive(reader, r) + (1 << r) - 1
+                # G.1.2.2 - End-of-Bands
+                # the rest of this block contains all zeros
+                # and EOBRUN next blocks are all zeros too
+                state.eobrun = receive_and_extend_pos(reader, r)
                 break
-            k += 16
-            continue
-        k += r
-        value = receive_and_extend(reader, s)
-        if scan.approx_low:
-            value *= (1 << scan.approx_low)
-        z = dezigzag[k]
-        block_data[z] = value
+            k += 15
+        else:
+            k += r
+            assert k <= scan.spectral_end
+            value = receive_and_extend(reader, s)
+            value = value << scan.approx_low
+            z = dezigzag[k]
+            block_data[z] = value
         k += 1
 
 def read_ac_prog_successive(state, reader, decoder, scan, block_data):
