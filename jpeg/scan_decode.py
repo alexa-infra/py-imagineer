@@ -106,8 +106,6 @@ def read_huffman(reader, decoder):
 def read_dc(reader, decoder, scan):
     s = read_huffman(reader, decoder)
     value = receive_and_extend(reader, s)
-    if scan.approx_low:
-        value = value << scan.approx_low
     return value
 
 def test_read_dc():
@@ -215,7 +213,7 @@ def read_dc_prog(reader, component, block_data, scan):
         dc = read_dc(reader, dc_decoder, scan)
         dc += component.last_dc
         component.last_dc = dc
-        block_data[0] = dc
+        block_data[0] = dc << scan.approx_low
     else:
         bit = next(reader)
         value = bit << scan.approx_low
