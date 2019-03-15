@@ -221,8 +221,17 @@ def read_dc_prog(reader, component, block_data, scan):
         value = bit << scan.approx_low
         block_data[0] |= value
 
-def read_ac_prog(state, reader, component, block_data, scan):
+class ProgState:
+    def __init__(self):
+        self.eobrun = 0
+        self.ac_state = 0
+        self.ac_next_value = 0
+
+def read_ac_prog(reader, component, block_data, scan):
     ac_decoder = bit_decoder(component.huffman_ac)
+    if not component.prog_state:
+        component.prog_state = ProgState()
+    state = component.prog_state
     if scan.approx_high == 0:
         read_ac_prog_first(state, reader, ac_decoder, scan, block_data)
     else:
@@ -254,7 +263,7 @@ def decode(fp, frame, scan):
         if scan.spectral_start == 0:
             decode_fn = read_dc_prog
         else:
-            decode_fn = lambda r, c, d, s: read_ac_prog(frame.prog_state, r, c, d, s)
+            decode_fn = read_ac_prog
     else:
         decode_fn = read_baseline
 

@@ -106,8 +106,7 @@ def parse_DQT(self, *args): # pylint: disable=unused-argument
             raise SyntaxError('only 8-bit quantization tables are supported')
         dqt = array('B', data.read(64))
         self.quantization[qc] = dequant = make_array('B', 64)
-        for i in range(64):
-            z = dezigzag[i]
+        for i, z in enumerate(dezigzag):
             dequant[z] = dqt[i]
 
 def parse_DNL(self, *args): # pylint: disable=unused-argument
@@ -300,6 +299,7 @@ class Component:
         self.blocks = None
 
         self.last_dc = 0
+        self.prog_state = None
 
     def prepare(self, frame):
         h, v = self.sampling
@@ -315,12 +315,6 @@ class Component:
         self.blocks_size = (width, height)
         self.blocks = [make_array('h', 64) for _ in range(width * height)]
 
-class ProgState:
-    def __init__(self):
-        self.eobrun = 0
-        self.ac_state = 0
-        self.ac_next_value = 0
-
 class Frame:
     def __init__(self, marker, w, h, cc):
         self.baseline = marker in sof_types.baseline
@@ -335,11 +329,6 @@ class Frame:
 
         self.max_h = 0
         self.max_v = 0
-
-        if self.progressive:
-            self.prog_state = ProgState()
-        else:
-            self.prog_state = None
 
     def add_component(self, idx, h, v):
         assert len(self.components) + 1 <= self.num_components
