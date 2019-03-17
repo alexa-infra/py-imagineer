@@ -131,37 +131,6 @@ def read_huffman(reader, decoder):
             return ch
     return None
 
-def read_dc(reader, decoder, scan):
-    s = read_huffman(reader, decoder)
-    value = receive_and_extend(reader, s)
-    return value
-
-def test_read_dc():
-    hh = {
-        10: (1, 1, 1, 1, 1, 1, 0)
-    }
-    decoder = bit_decoder(hh)
-    b = BytesIO(b'\xfc\xff\x00\xe2\xaf')
-    reader = bit_reader(b)
-    value = read_dc(reader, decoder, None)
-    assert value == -512
-
-def read_ac(reader, decoder, scan):
-    k = 1
-    while k <= 63:
-        rs = read_huffman(reader, decoder)
-        r, s = high_low4(rs)
-        if s == 0:
-            if r < 15:
-                break
-            k += 15
-        else:
-            k += r
-            value = receive_and_extend(reader, s)
-            z = dezigzag[k]
-            yield z, value
-        k += 1
-
 def read_ac_prog_first(state, reader, decoder, scan, block_data):
     if state.eobrun > 0:
         # G.1.2.2 - this AC block contains all zeros
@@ -231,19 +200,37 @@ def read_ac_prog_successive(state, reader, decoder, scan, block_data):
 
 def read_baseline(reader, component, block_data, scan):
     dc_decoder = bit_decoder(component.huffman_dc)
-    dc = read_dc(reader, dc_decoder, scan)
+
+    s = read_huffman(reader, dc_decoder)
+    dc = receive_and_extend(reader, s)
+
     dc += component.last_dc
     component.last_dc = dc
     block_data[0] = dc
 
     ac_decoder = bit_decoder(component.huffman_ac)
-    for pos, ac in read_ac(reader, ac_decoder, scan):
-        block_data[pos] = ac
+    k = 1
+    while k <= 63:
+        rs = read_huffman(reader, ac_decoder)
+        r, s = high_low4(rs)
+        if s == 0:
+            if r < 15:
+                break
+            k += 15
+        else:
+            k += r
+            ac = receive_and_extend(reader, s)
+            z = dezigzag[k]
+            block_data[z] = ac
+        k += 1
 
 def read_dc_prog(reader, component, block_data, scan):
     if scan.approx_high == 0:
         dc_decoder = bit_decoder(component.huffman_dc)
-        dc = read_dc(reader, dc_decoder, scan)
+
+        s = read_huffman(reader, dc_decoder)
+        dc = receive_and_extend(reader, s)
+
         dc += component.last_dc
         component.last_dc = dc
         block_data[0] = dc << scan.approx_low
