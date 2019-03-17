@@ -159,36 +159,64 @@ def read_ac_prog_first(state, reader, decoder, scan, block_data):
         k += 1
 
 def read_ac_prog_successive(state, reader, decoder, scan, block_data):
+    assert state.ac_state in (0, 4)
     k = scan.spectral_start
-    while k <= scan.spectral_end:
+    e = scan.spectral_end
+    r = 0
+    while k <= e:
         z = dezigzag[k]
         sign = -1 if block_data[z] < 0 else 1
+        # if AC has non-zero history, then we will refine its value
+        has_prev_value = block_data[z] != 0
+
         if state.ac_state == 0:
+            # initial state, we read encoded RRRRSSSS Huffman value
+            # R is the number of zero values before current value
+            # S is the amplitude of refine (should be 1)
             rs = read_huffman(reader, decoder)
             r, s = high_low4(rs)
             if s == 0:
                 if r < 15:
+                    # EOB, we should skip all next zero values and
+                    # refine non-zero values till the end of block
+                    # For the next EOBRUN-1 blocks we do the same
                     state.eobrun = receive_and_extend_pos(reader, r)
                     state.ac_state = 4
                 else:
+                    # We skip next 16 zero values and refine all
+                    # non-zero values between them
                     r = 16
                     state.ac_state = 1
             elif s == 1:
+                # We skip next R zero values and refine non-zero
+                # values between them, after that we set current
+                # value to ac_next_value
                 state.ac_next_value = receive_and_extend(reader, s)
                 state.ac_state = 2 if r else 3
-            continue
-        elif block_data[z]:
-            value = next(reader) << scan.approx_low
-            block_data[z] += sign * value
-        elif state.ac_state == 1 or state.ac_state == 2:
-            r -= 1
-            if r == 0:
-                state.ac_state = 3 if state.ac_state == 2 else 0
+            else:
+                raise SyntaxError('invalid s value')
+
+        if state.ac_state == 1 or state.ac_state == 2:
+            if has_prev_value:
+                value = next(reader) << scan.approx_low
+                block_data[z] += sign * value
+            else:
+                r -= 1
+                if r == 0:
+                    state.ac_state = 3 if state.ac_state == 2 else 0
+
         elif state.ac_state == 3:
-            block_data[z] = state.ac_next_value << scan.approx_low
-            state.ac_state = 0
+            if has_prev_value:
+                value = next(reader) << scan.approx_low
+                block_data[z] += sign * value
+            else:
+                block_data[z] = state.ac_next_value << scan.approx_low
+                state.ac_state = 0
+
         elif state.ac_state == 4:
-            pass
+            if has_prev_value:
+                value = next(reader) << scan.approx_low
+                block_data[z] += sign * value
         k += 1
     if state.ac_state == 4:
         state.eobrun -= 1
