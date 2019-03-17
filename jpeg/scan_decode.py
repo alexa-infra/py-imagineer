@@ -297,13 +297,6 @@ class ProgState:
         self.ac_state = 0
         self.ac_next_value = None
 
-def read_ac_prog(reader, component, block_data, scan):
-    ac_decoder = bit_decoder(component.huffman_ac)
-    if scan.approx_high == 0:
-        read_ac_prog_first(state, reader, ac_decoder, scan, block_data)
-    else:
-        read_ac_prog_refine(state, reader, ac_decoder, scan, block_data)
-
 def set_block(data, block_data, row, col, width):
     offset = row * width + col
     for i in range(8):
