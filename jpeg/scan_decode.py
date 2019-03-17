@@ -159,9 +159,6 @@ def read_ac_prog_first(state, reader, decoder, scan, block_data):
         k += 1
 
 def read_ac_prog_successive(state, reader, decoder, scan, block_data):
-    if state.eobrun > 0:
-        state.eobrun -= 1
-        return
     k = scan.spectral_start
     while k <= scan.spectral_end:
         z = dezigzag[k]
