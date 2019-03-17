@@ -178,6 +178,7 @@ class Scan:
         self.spectral_end = 0
         self.approx_high = 0
         self.approx_low = 0
+        self.prog_state = None
 
 def parse_SOS(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
@@ -205,7 +206,11 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
     scan.spectral_start = read_u8(data)
     scan.spectral_end = read_u8(data)
     scan.approx_high, scan.approx_low = high_low4(read_u8(data))
-    if not frame.progressive:
+    if frame.progressive:
+        isDC = scan.spectral_start == 0
+        if not isDC:
+            assert len(scan.components) == 1
+    else:
         assert scan.spectral_start == 0
         assert scan.spectral_end == 63
         assert scan.approx_high == 0
@@ -299,7 +304,6 @@ class Component:
         self.blocks = None
 
         self.last_dc = 0
-        self.prog_state = None
 
     def prepare(self, frame):
         h, v = self.sampling
