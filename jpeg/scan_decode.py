@@ -96,28 +96,29 @@ def receive_and_extend(reader, length):
     n = receive(reader, length)
     return ext_table(n, length)
 
+_bias2 = lambda n: 1 << n
+bias2 = [_bias2(n) for n in range(16)]
+
 def ext_table_pos(n, length):
     """
     Table G.1. - EOBn code run length extensions
-    length=0                        -> 0
-    length=1 0b0, 0b1               -> 1, 2
-    length=2 0b00, 0b01, 0b10, 0b11 -> 3, 4, 5, 6
-    length=3 0b000, ..., 0b111      -> 7, 8, 9, 10, 11, 12, 13, 14
+    length=0                        -> 1
+    length=1 0b0, 0b1               -> 2, 3
+    length=2 0b00, 0b01, 0b10, 0b11 -> 4, 5, 6, 7
+    length=3 0b000, ..., 0b111      -> 8, 9, 10, 11, 12, 13, 14, 15
     ....
     """
-    if length == 0:
-        return 0
-    return n + bmask[length]
+    return n + bias2[length]
 
 def test_ext_table_pos():
-    assert ext_table_pos(0, 0) == 0
-    assert ext_table_pos(0b0, 1) == 1
-    assert ext_table_pos(0b1, 1) == 2
-    assert ext_table_pos(0b00, 2) == 3
-    assert ext_table_pos(0b01, 2) == 4
-    assert ext_table_pos(0b10, 2) == 5
-    assert ext_table_pos(0b000, 3) == 7
-    assert ext_table_pos(0b111, 3) == 14
+    assert ext_table_pos(0, 0) == 1
+    assert ext_table_pos(0b0, 1) == 2
+    assert ext_table_pos(0b1, 1) == 3
+    assert ext_table_pos(0b00, 2) == 4
+    assert ext_table_pos(0b01, 2) == 5
+    assert ext_table_pos(0b10, 2) == 6
+    assert ext_table_pos(0b000, 3) == 8
+    assert ext_table_pos(0b111, 3) == 15
 
 def receive_and_extend_pos(reader, length):
     n = receive(reader, length)
@@ -176,6 +177,7 @@ def read_ac_prog_first(state, reader, decoder, scan, block_data):
                 # the rest of this block contains all zeros
                 # and EOBRUN next blocks are all zeros too
                 state.eobrun = receive_and_extend_pos(reader, r)
+                state.eobrun -= 1
                 break
             k += 15
         else:
@@ -200,7 +202,7 @@ def read_ac_prog_successive(state, reader, decoder, scan, block_data):
             r, s = high_low4(rs)
             if s == 0:
                 if r < 15:
-                    state.eobrun = receive(reader, r) + (1 << r) - 1
+                    state.eobrun = receive_and_extend_pos(reader, r)
                     state.ac_state = 4
                 else:
                     r = 16
