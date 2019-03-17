@@ -186,9 +186,7 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
     frame = self.frame
 
     n = read_u8(data)
-    if length != n * 2 + 4 or n > 4:
-        raise SyntaxError('SOS bad length')
-    if n == 0 and not frame.progressive:
+    if length != n * 2 + 4 or n > 4 or n == 0:
         raise SyntaxError('SOS bad length')
 
     scan = Scan()
@@ -208,13 +206,19 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
     scan.approx_high, scan.approx_low = high_low4(read_u8(data))
     if frame.progressive:
         isDC = scan.spectral_start == 0
+        isRefine = scan.approx_high != 0
         if not isDC:
             assert len(scan.components) == 1
+        cids = [str(c.id) for c in scan.components]
+        print('Progressive, {}, isRefine={}, nComp={} ({}), Indexes: {}->{}'.format(
+            'DC' if isDC else 'AC', isRefine, len(scan.components),
+            ','.join(cids), scan.spectral_start, scan.spectral_end))
     else:
         assert scan.spectral_start == 0
         assert scan.spectral_end == 63
         assert scan.approx_high == 0
         assert scan.approx_low == 0
+        print('Baseline, nComp={}'.format(len(scan.components)))
 
     frame.restart_interval = self.restart_interval
     decode(self.fp, frame, scan)
@@ -441,11 +445,17 @@ class JpegImage:
         assert JPG not in markers
 
     def process(self):
+        markers = [m for c, m, p in self.marker_codes]
+        n_scans = markers.count(SOS)
+        scan = 0
         for code, marker, pos in self.marker_codes:
             parser = parsers.get(marker)
             if not parser:
                 continue
             self.fp.seek(pos)
+            if marker == SOS:
+                scan += 1
+                print('Scan {}/{}'.format(scan, n_scans))
             parser(self, code)
 
         decode_finish(self.frame)
