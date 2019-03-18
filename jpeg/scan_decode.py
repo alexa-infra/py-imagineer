@@ -7,49 +7,60 @@ from .idct import idct_2d
 from .utils import high_low4
 
 
-def bit_reader(data):
-    bits = None
-    bit_counter = 0
+class BitReader:
+    def __init__(self, data):
+        self.data = data
+        self.bits = None
+        self.bit_counter = 0
 
-    while True:
-        if not bits or bit_counter >= 8:
-            byte = data.read(1)
-            if not byte:
-                return # EOF
-            byte = struct.unpack('B', byte)[0]
-            if byte == 0xFF:
-                next_byte = data.read(1)
-                if not next_byte:
-                    return
-                next_byte = struct.unpack('B', next_byte)[0]
-                if 0xD0 <= next_byte <= 0xD7:
-                    yield None # signals decoder to reset bit counter
-                    continue
-                elif next_byte == 0x00:
-                    pass # 0xFF00 is encoded 0xFF
-                else:
-                    raise SyntaxError('found 0xFF{0:X} marker'.format(next_byte))
-            bits = byte_to_bits(byte)
-            bit_counter = 0
+    def __iter__(self):
+        return self
 
-        yield bits[bit_counter]
-        bit_counter += 1
+    def __next__(self):
+        if not self.bits or self.bit_counter >= 8:
+            byte = self.get_next_byte()
+            self.bits = byte_to_bits(byte)
+            self.bit_counter = 0
+
+        bit = self.bits[self.bit_counter]
+        self.bit_counter += 1
+        return bit
+
+    def reset(self):
+        self.bits = None
+        self.bit_counter = 0
+
+    def read_byte(self):
+        byte = self.data.read(1)
+        if not byte:
+            raise StopIteration
+        return struct.unpack('B', byte)[0]
+
+    def get_next_byte(self):
+        byte = self.read_byte()
+        if byte == 0xFF:
+            next_byte = self.read_byte()
+            if next_byte == 0x00:
+                return byte
+            else:
+                raise SyntaxError('found 0xFF{0:X} marker'.format(next_byte))
+        return byte
 
 def test_bit_reader():
     b = BytesIO(b'\xa0')
-    r = bit_reader(b)
+    r = BitReader(b)
     bits = tuple(r)
     assert bits == (1, 0, 1, 0, 0, 0, 0, 0)
 
 def test_bit_reader2():
     b = BytesIO(b'\xa0\x0f')
-    r = bit_reader(b)
+    r = BitReader(b)
     bits = tuple(r)
     assert bits == (1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1)
 
 def test_bit_reader_ff00():
     b = BytesIO(b'\xff\x00\xa0')
-    r = bit_reader(b)
+    r = BitReader(b)
     bits = tuple(r)
     assert bits == (1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0)
 
@@ -315,40 +326,50 @@ def iter_block_samples(component, row, col):
             yield blocks[sub_row * w + sub_col]
 
 def decode(fp, frame, scan):
-    reader = bit_reader(fp)
+    reader = BitReader(fp)
     components = scan.components
+    restart_interval = frame.restart_interval
+    non_interleaved = len(components) == 1
 
     if frame.progressive:
-        decode_fn = read_progressive
+        decode_fn = lambda c, b: read_progressive(reader, c, b, scan)
     else:
-        decode_fn = read_baseline
+        decode_fn = lambda c, b: read_baseline(reader, c, b, scan)
 
     n = 0
-    if len(components) == 1:
-        # non-interleaved
+    restart = 0
+
+    if non_interleaved:
         component = components[0]
-        blocks = component.blocks
         blocks_x, blocks_y = component.blocks_size
-        for block_row in range(blocks_y):
-            for block_col in range(blocks_x):
-                block = blocks[block_row * blocks_x + block_col]
-                decode_fn(reader, component, block, scan)
-                n += 1
-                if frame.restart_interval and n % frame.restart_interval == 0:
-                    component.last_dc = 0
-                    scan.prog_state = None
     else:
-        # interleaved
         blocks_x, blocks_y = frame.blocks_size
-        for block_row in range(blocks_y):
-            for block_col in range(blocks_x):
-                for comp in components:
-                    for block in iter_block_samples(comp, block_row, block_col):
-                        decode_fn(reader, comp, block, scan)
+
+    for block_row in range(blocks_y):
+        for block_col in range(blocks_x):
+            if non_interleaved:
+                # non-interleaved
+                component = components[0]
+                block = component.blocks[block_row * blocks_x + block_col]
+                decode_fn(component, block)
+            else:
+                # interleaved
+                for component in components:
+                    for block in iter_block_samples(component, block_row, block_col):
+                        decode_fn(component, block)
+            if restart_interval:
                 n += 1
-                if frame.restart_interval and n % frame.restart_interval == 0:
-                    for c in components:
-                        c.last_dc = 0
+                if n < blocks_x * blocks_y and n % restart_interval == 0:
+                    byte1 = reader.read_byte()
+                    byte2 = reader.read_byte()
+                    assert byte1 == 0xFF, '0x{0:X}'.format(byte1)
+                    assert 0xD0 <= byte2 <= 0xD7, '0xFF{0:X}'.format(byte2)
+                    assert byte2 == 0xD0 + restart
+                    restart = (restart + 1) % 8
+                    reader.reset()
+                    for component in components:
+                        component.last_dc = 0
+                    scan.prog_state = None
 
 def decode_prog_block_finish(component, block_data):
     qt = component.quantization
