@@ -4,6 +4,7 @@ from array import array
 from io import BytesIO
 
 import huffman
+from huffman.decoding import BitDecoder
 from .scan_decode import decode, decode_finish
 from .zigzag import dezigzag
 from . import sof_types
@@ -197,8 +198,10 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
         comp = frame.components_ids[idx]
         dc_id, ac_id = high_low4(c)
         # progressive scan might have no AC
-        comp.huffman_dc = self.huffman_dc.get(dc_id)
-        comp.huffman_ac = self.huffman_ac.get(ac_id)
+        huffman_dc = self.huffman_dc.get(dc_id)
+        comp.huffman_dc = BitDecoder(huffman_dc) if huffman_dc else None
+        huffman_ac = self.huffman_ac.get(ac_id)
+        comp.huffman_ac = BitDecoder(huffman_ac) if huffman_ac else None
         scan.components.append(comp)
 
     scan.spectral_start = read_u8(data)
