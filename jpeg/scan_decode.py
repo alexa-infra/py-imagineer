@@ -1,11 +1,10 @@
-import math
 from io import BytesIO
 import struct
 from huffman.decoding import bit_decoder
 from huffman.utils import byte_to_bits
 from .zigzag import dezigzag
 from .idct import idct_2d
-from .utils import high_low4, make_array
+from .utils import high_low4
 
 
 def bit_reader(data):

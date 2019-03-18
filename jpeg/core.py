@@ -305,6 +305,7 @@ class Component:
 
         self.size = (0, 0) # effective pixels, non-iterleaved MCU
         self.data = None
+        self.blocks_size = (0, 0)
         self.blocks = None
 
         self.last_dc = 0
@@ -337,6 +338,7 @@ class Frame:
 
         self.max_h = 0
         self.max_v = 0
+        self.blocks_size = (0, 0)
 
     def add_component(self, idx, h, v):
         assert len(self.components) + 1 <= self.num_components
