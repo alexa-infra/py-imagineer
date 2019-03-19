@@ -1,39 +1,52 @@
 from io import BytesIO
-import struct
+from array import array
 from huffman.utils import byte_to_bits
 from .zigzag import dezigzag
 from .idct import idct_2d
 from .utils import high_low4
 
+CHUNK_LEN = 10 * 1024
 
 class BitReader:
     def __init__(self, data):
         self.data = data
-        self.bits = None
-        self.bit_counter = 0
+        self.byte = None
+        self.bit_counter = 8
+        self.chunk = None
+        self.chunk_it = 0
+        self.chunk_len = 0
+        self._next_chunk()
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        if not self.bits or self.bit_counter >= 8:
-            byte = self.get_next_byte()
-            self.bits = byte_to_bits(byte)
+        if self.bit_counter >= 8:
+            self.byte = self.get_next_byte()
             self.bit_counter = 0
 
-        bit = self.bits[self.bit_counter]
+        n = 8 - self.bit_counter - 1
+        vbit = self.byte & bias2[n]
         self.bit_counter += 1
-        return bit
+        return 1 if vbit else 0
 
     def reset(self):
-        self.bits = None
-        self.bit_counter = 0
+        self.byte = None
+        self.bit_counter = 8
+
+    def _next_chunk(self):
+        self.chunk = array('B', self.data.read(CHUNK_LEN))
+        self.chunk_it = 0
+        self.chunk_len = len(self.chunk)
 
     def read_byte(self):
-        byte = self.data.read(1)
-        if not byte:
+        if self.chunk_it >= CHUNK_LEN:
+            self._next_chunk()
+        if self.chunk_it >= self.chunk_len:
             raise StopIteration
-        return struct.unpack('B', byte)[0]
+        byte = self.chunk[self.chunk_it]
+        self.chunk_it += 1
+        return byte
 
     def get_next_byte(self):
         byte = self.read_byte()
