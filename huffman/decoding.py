@@ -1,8 +1,7 @@
 import struct
-from itertools import chain
+from itertools import chain, repeat
 
-from .utils import rev_dict
-from .utils import byte_to_bits
+from .utils import byte_to_bits, bits_to_byte
 
 
 read8 = lambda inp: struct.unpack('B', inp.read(1))[0]
@@ -11,22 +10,40 @@ read16 = lambda inp: struct.unpack('<H', inp.read(2))[0]
 
 class BitDecoder:
     def __init__(self, codes):
-        self.revcodes = rev_dict(codes)
-        self.bits = list()
+        self.rcodes = dict()
+        self.lcodes = list(repeat(0, 17))
+        self.bits_len = 0
+        self.cached = 0
+        for code, bits in codes.items():
+            length = len(bits)
+            val = bits_to_byte(bits)
+            self.rcodes[(length, val)] = code
+            self.lcodes[length] += 1
 
     def __call__(self, bit):
         assert bit in (0, 1)
-        if len(self.bits) + 1 > 16:
+        if self.bits_len + 1 > 16:
             raise SyntaxError('broken huffman code')
-        self.bits.append(bit)
-        t = tuple(self.bits)
-        if t in self.revcodes:
-            self.bits.clear()
-            return self.revcodes[t]
-        return None
+
+        self.bits_len += 1
+        self.cached = (self.cached << 1) | bit
+
+        if not self.lcodes[self.bits_len]:
+            return None
+
+        key = (self.bits_len, self.cached)
+
+        code = self.rcodes.get(key)
+        if code is None:
+            return None
+
+        self.bits_len = 0
+        self.cached = 0
+        return code
 
     def reset(self):
-        self.bits.clear()
+        self.bits_len = 0
+        self.cached = 0
 
 def byte_decoder(codes):
     decoder = BitDecoder(codes)
