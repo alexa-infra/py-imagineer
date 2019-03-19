@@ -15,13 +15,6 @@ w3mw5 = w3 - w5
 
 r2 = 181 # 256/sqrt(2)
 
-def clip(x, m, n):
-    if x > n:
-        return n
-    if x < m:
-        return m
-    return x
-
 def idct_2d(src):
     # Horizontal 1-D IDCT
     for y in range(0, 8):
@@ -135,10 +128,5 @@ def idct_2d(src):
         src[8*5+x] = (y0 - y4) >> 14
         src[8*6+x] = (y3 - y2) >> 14
         src[8*7+x] = (y7 - y1) >> 14
-
-    for i in range(64):
-        v = int(src[i])
-        v += 128
-        src[i] = clip(v, 0, 255)
 
     return src

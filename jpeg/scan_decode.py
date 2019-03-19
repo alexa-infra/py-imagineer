@@ -374,11 +374,20 @@ def decode(fp, frame, scan):
                             component.huffman_ac.reset()
                     scan.prog_state = None
 
+def clamp(x):
+    if x < -128:
+        return 0
+    if x > 127:
+        return 255
+    return x + 128
+
 def decode_prog_block_finish(component, block_data):
     qt = component.quantization
     for c in range(64):
         block_data[c] *= qt[c]
     idct_2d(block_data)
+    for c in range(64):
+        block_data[c] = clamp(block_data[c])
 
 def decode_finish(frame):
     for comp in frame.components:
