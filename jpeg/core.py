@@ -485,6 +485,6 @@ class JpegImage:
                     scalex, scaley = c.scale
                     width, _ = c.size
 
-                    coord1 = (row // scalex) * width + (col // scaley)
+                    coord1 = (row // scaley) * width + (col // scalex)
                     r[coord * n + idx] = c.data[coord1]
         return r
