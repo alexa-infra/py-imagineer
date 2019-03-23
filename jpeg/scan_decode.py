@@ -79,7 +79,10 @@ def test_bit_reader_ff00():
 def receive(r, length):
     n = 0
     while length:
-        n = (n << 1) | next(r)
+        #n = (n << 1) | next(r)
+        bit = next(r)
+        if bit:
+            n = n | bias2[length-1]
         length -= 1
     return n
 
