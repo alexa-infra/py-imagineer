@@ -82,15 +82,15 @@ def parse_DHT(self, *args): # pylint: disable=unused-argument
         tc, th = high_low4(read_u8(data))
         if tc > 1 or th > 3:
             raise SyntaxError('bad DHT table')
-        isDC = tc == 0
-        maxsymbol = 15 if isDC else 255
+        is_dc = tc == 0
+        maxsymbol = 15 if is_dc else 255
 
         codes = huffman.decode_table(data)
         for code, _ in codes.items():
             if code < 0 or code > maxsymbol:
                 raise SyntaxError('bad Huffman table')
 
-        if isDC:
+        if is_dc:
             self.huffman_dc[th] = codes
         else:
             self.huffman_ac[th] = codes
@@ -281,12 +281,6 @@ marker_map = {
     0xFFFE: COM, # COM - Comment
 }
 
-def parse_marker_code(marker):
-
-    if marker not in marker_map:
-        raise BadMarker('unknown marker 0x{0:X}'.format(marker))
-    return marker_map[marker]
-
 parsers = {
     DHT: parse_DHT,
     DQT: parse_DQT,
@@ -392,7 +386,10 @@ class JpegImage:
                 else:
                     code = get_marker_code(self.fp)
 
-                marker = parse_marker_code(code)
+                try:
+                    marker = marker_map[code]
+                except KeyError:
+                    raise BadMarker(code)
                 pos = self.fp.tell()
                 marker_codes.append((code, marker, pos))
 
@@ -467,6 +464,8 @@ class JpegImage:
 
     def get_format(self):
         n = len(self.frame.components)
+        if n == 4:
+            return 'CMYK'
         if n == 3:
             return 'YCbCr'
         if n == 1:
