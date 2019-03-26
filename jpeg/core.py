@@ -180,6 +180,8 @@ def parse_SOF(self, marker, *args): # pylint: disable=unused-argument
 class Scan:
     def __init__(self):
         self.components = []
+        self.huffman_dc = {}
+        self.huffman_ac = {}
         self.spectral_start = 0
         self.spectral_end = 0
         self.approx_high = 0
@@ -218,11 +220,10 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
             raise SyntaxError('Bad component id')
         comp = frame.components_ids[idx]
         dc_id, ac_id = high_low4(c)
-        # progressive scan might have no AC
-        huffman_dc = self.huffman_dc.get(dc_id)
-        comp.huffman_dc = BitDecoder(huffman_dc) if huffman_dc else None
-        huffman_ac = self.huffman_ac.get(ac_id)
-        comp.huffman_ac = BitDecoder(huffman_ac) if huffman_ac else None
+
+        scan.huffman_dc[idx] = self.get_dc_decoder(dc_id)
+        scan.huffman_ac[idx] = self.get_ac_decoder(ac_id)
+
         scan.components.append(comp)
 
     k, e, approx = struct.unpack('3B', data.read(3))
@@ -311,8 +312,6 @@ class Component:
         self.sampling = (h, v)
         self.scale = (0, 0)
         self.quantization = None
-        self.huffman_dc = None
-        self.huffman_ac = None
 
         self.size = (0, 0) # effective pixels, non-iterleaved MCU
         self.data = None
@@ -383,6 +382,14 @@ class JpegImage:
 
         self.frame = None
         self.marker_codes = []
+
+    def get_dc_decoder(self, dc_id):
+        huffman_dc = self.huffman_dc.get(dc_id)
+        return BitDecoder(huffman_dc) if huffman_dc else None
+
+    def get_ac_decoder(self, ac_id):
+        huffman_ac = self.huffman_ac.get(ac_id)
+        return BitDecoder(huffman_ac) if huffman_ac else None
 
     def prescan(self):
         self.marker_codes = marker_codes = []

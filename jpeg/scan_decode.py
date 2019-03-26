@@ -255,7 +255,7 @@ def read_ac_prog_refine(reader, decoder, block_data, scan, component):
             state.ac_state = 0
 
 def read_baseline(reader, component, block_data, scan):
-    dc_decoder = component.huffman_dc
+    dc_decoder = scan.huffman_dc[component.id]
 
     s = read_huffman(reader, dc_decoder)
     dc = receive_and_extend(reader, s)
@@ -264,7 +264,7 @@ def read_baseline(reader, component, block_data, scan):
     component.last_dc = dc
     block_data[0] = dc
 
-    ac_decoder = component.huffman_ac
+    ac_decoder = scan.huffman_ac[component.id]
     k = 1
     while k <= 63:
         rs = read_huffman(reader, ac_decoder)
@@ -294,9 +294,9 @@ def read_progressive(reader, component, block_data, scan):
         else:
             read_fn = read_ac_prog_refine
     if scan.is_dc:
-        decoder = component.huffman_dc
+        decoder = scan.huffman_dc[component.id]
     else:
-        decoder = component.huffman_ac
+        decoder = scan.huffman_ac[component.id]
     read_fn(reader, decoder, block_data, scan, component)
 
 def read_dc_prog_first(reader, decoder, block_data, scan, component):
