@@ -283,19 +283,17 @@ def read_baseline(reader, component, block_data, scan):
 def read_progressive(reader, component, block_data, scan):
     # progressive scan contains either AC or DC values
     # DC might be interleaved, AC is only non-interleaved
-    isDC = scan.spectral_start == 0
-    isRefine = scan.approx_high != 0
-    if not isRefine:
-        if isDC:
+    if not scan.is_refine:
+        if scan.is_dc:
             read_fn = read_dc_prog_first
         else:
             read_fn = read_ac_prog_first
     else:
-        if isDC:
+        if scan.is_dc:
             read_fn = read_dc_prog_refine
         else:
             read_fn = read_ac_prog_refine
-    if isDC:
+    if scan.is_dc:
         decoder = component.huffman_dc
     else:
         decoder = component.huffman_ac
@@ -342,7 +340,7 @@ def decode(fp, frame, scan):
     reader = BitReader(fp)
     components = scan.components
     restart_interval = frame.restart_interval
-    non_interleaved = len(components) == 1
+    non_interleaved = not scan.is_interleaved
 
     if frame.progressive:
         decode_fn = lambda c, b: read_progressive(reader, c, b, scan)

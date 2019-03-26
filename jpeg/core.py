@@ -76,6 +76,8 @@ def parse_DRI(self, *args): # pylint: disable=unused-argument
     if length < 2:
         raise SyntaxError('bad DRI block')
     self.restart_interval = read_u16(data)
+    if self.frame:
+        self.frame.restart_interval = self.restart_interval
 
 def parse_DHT(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
@@ -165,7 +167,8 @@ def parse_SOF(self, marker, *args): # pylint: disable=unused-argument
     if length < 6 + 3 * cc:
         raise SyntaxError('bad SOF length')
 
-    frame = self.frame = Frame(marker, w, h, cc)
+    frame = self.frame = Frame(marker, w, h)
+    frame.restart_interval = self.restart_interval
 
     for _ in range(cc):
         idx, q, tq = struct.unpack('3B', data.read(3))
@@ -183,6 +186,22 @@ class Scan:
         self.approx_low = 0
         self.prog_state = None
 
+    @property
+    def is_refine(self):
+        return self.approx_high != 0
+
+    @property
+    def is_dc(self):
+        return self.spectral_start == 0
+
+    @property
+    def is_ac(self):
+        return self.spectral_start != 0
+
+    @property
+    def is_interleaved(self):
+        return len(self.components) > 1
+
 def parse_SOS(self, *args): # pylint: disable=unused-argument
     data, length = read_block(self.fp)
 
@@ -194,7 +213,7 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
 
     scan = Scan()
     for _ in range(n):
-        idx, c = struct.unpack('BB', data.read(2))
+        idx, c = struct.unpack('2B', data.read(2))
         if idx not in frame.components_ids:
             raise SyntaxError('Bad component id')
         comp = frame.components_ids[idx]
@@ -206,26 +225,19 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
         comp.huffman_ac = BitDecoder(huffman_ac) if huffman_ac else None
         scan.components.append(comp)
 
-    scan.spectral_start = read_u8(data)
-    scan.spectral_end = read_u8(data)
-    scan.approx_high, scan.approx_low = high_low4(read_u8(data))
+    k, e, approx = struct.unpack('3B', data.read(3))
+    scan.spectral_start = k
+    scan.spectral_end = e
+    scan.approx_high, scan.approx_low = high_low4(approx)
     if frame.progressive:
-        isDC = scan.spectral_start == 0
-        isRefine = scan.approx_high != 0
-        if not isDC:
-            assert len(scan.components) == 1
-        cids = [str(c.id) for c in scan.components]
-        print('Progressive, {}, isRefine={}, nComp={} ({}), Indexes: {}->{}'.format(
-            'DC' if isDC else 'AC', isRefine, len(scan.components),
-            ','.join(cids), scan.spectral_start, scan.spectral_end))
+        if scan.is_ac and not n == 1:
+            raise SyntaxError('Progressive AC scan has {} components'.format(n))
     else:
-        assert scan.spectral_start == 0
-        assert scan.spectral_end == 63
-        assert scan.approx_high == 0
-        assert scan.approx_low == 0
-        print('Baseline, nComp={}'.format(len(scan.components)))
+        if not (k == 0 and e == 63 and approx == 0):
+            raise SyntaxError('Invalid scan values for baseline')
+        if not len(frame.components) == n:
+            raise SyntaxError('Baseline scan has not enough components')
 
-    frame.restart_interval = self.restart_interval
     decode(self.fp, frame, scan)
 
 
@@ -324,13 +336,12 @@ class Component:
         self.blocks = [make_array('h', 64) for _ in range(width * height)]
 
 class Frame:
-    def __init__(self, marker, w, h, cc):
+    def __init__(self, marker, w, h):
         self.baseline = marker in sof_types.baseline
         self.extended = marker in sof_types.sequential
         self.progressive = marker in sof_types.progressive
         self.h = h
         self.w = w
-        self.num_components = cc
         self.components = []
         self.components_ids = {}
         self.restart_interval = None
@@ -340,7 +351,6 @@ class Frame:
         self.blocks_size = (0, 0)
 
     def add_component(self, idx, h, v):
-        assert len(self.components) + 1 <= self.num_components
         comp = Component(idx, h, v)
         self.components.append(comp)
         self.components_ids[idx] = comp
