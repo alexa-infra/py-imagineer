@@ -1,6 +1,5 @@
 from io import BytesIO
 from array import array
-from huffman.utils import byte_to_bits
 from .zigzag import dezigzag
 from .idct import idct_2d
 from .utils import high_low4
@@ -54,8 +53,7 @@ class BitReader:
             next_byte = self.read_byte()
             if next_byte == 0x00:
                 return byte
-            else:
-                raise SyntaxError('found 0xFF{0:X} marker'.format(next_byte))
+            raise SyntaxError('found 0xFF{0:X} marker'.format(next_byte))
         return byte
 
 def test_bit_reader():
