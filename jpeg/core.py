@@ -35,7 +35,9 @@ class EOF(Exception):
     pass
 
 class BadMarker(Exception):
-    pass
+    def __init__(self, byte):
+        super().__init__()
+        self.msg = 'unknown marker 0x{0:X}'.format(byte)
 
 def safe_read(f, n):
     data = f.read(n)
@@ -56,7 +58,7 @@ def get_marker_code(f, throw=True):
     m = read_u8(f)
     if m != 0xFF:
         if throw:
-            raise BadMarker()
+            raise BadMarker(m)
         return None
     n = read_u8(f)
     return (m << 8) | n
