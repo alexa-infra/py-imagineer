@@ -6,8 +6,9 @@ from PIL import Image
 def main(filename):
     with open(filename, 'rb') as f:
         img = JpegImage(f)
-        img.prescan()
         img.process()
+        if not img.is_valid:
+            return
 
         frame = img.frame
 

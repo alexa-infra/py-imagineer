@@ -169,16 +169,17 @@ def parse_SOF(self, marker, *args): # pylint: disable=unused-argument
 
     frame = self.frame = Frame(marker, w, h)
     frame.restart_interval = self.restart_interval
+    frame.quantization = self.quantization
 
     for _ in range(cc):
         idx, q, tq = struct.unpack('3B', data.read(3))
         h, v = high_low4(q)
-        comp = frame.add_component(idx, h, v)
-        comp.quantization = self.quantization[tq]
-    frame.prepare()
+        frame.add_component(idx, h, v, tq)
 
 class Scan:
-    def __init__(self):
+    def __init__(self, frame):
+        self.position = None
+        self.frame = frame
         self.components = []
         self.huffman_dc = {}
         self.huffman_ac = {}
@@ -213,7 +214,8 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
     if length != n * 2 + 4 or n > 4 or n == 0:
         raise SyntaxError('SOS bad length')
 
-    scan = Scan()
+    scan = Scan(frame)
+
     for _ in range(n):
         idx, c = struct.unpack('2B', data.read(2))
         if idx not in frame.components_ids:
@@ -239,7 +241,8 @@ def parse_SOS(self, *args): # pylint: disable=unused-argument
         if not len(frame.components) == n:
             raise SyntaxError('Baseline scan has not enough components')
 
-    decode(self.fp, frame, scan)
+    scan.position = self.fp.tell()
+    self.scans.append(scan)
 
 
 marker_map = {
@@ -307,11 +310,11 @@ parsers = {
 }
 
 class Component:
-    def __init__(self, idx, h, v):
+    def __init__(self, idx, h, v, qc):
         self.id = idx
         self.sampling = (h, v)
         self.scale = (0, 0)
-        self.quantization = None
+        self.qc = qc
 
         self.size = (0, 0) # effective pixels, non-iterleaved MCU
         self.data = None
@@ -344,13 +347,14 @@ class Frame:
         self.components = []
         self.components_ids = {}
         self.restart_interval = None
+        self.quantization = None
 
         self.max_h = 0
         self.max_v = 0
         self.blocks_size = (0, 0)
 
-    def add_component(self, idx, h, v):
-        comp = Component(idx, h, v)
+    def add_component(self, idx, h, v, qc):
+        comp = Component(idx, h, v, qc)
         self.components.append(comp)
         self.components_ids[idx] = comp
         self.max_h = max(h, self.max_h)
@@ -368,6 +372,7 @@ class JpegImage:
 
     def __init__(self, fp):
         self.fp = fp
+        self.is_valid = None
 
         self.huffman_dc = {}
         self.huffman_ac = {}
@@ -381,6 +386,7 @@ class JpegImage:
         self.adobe_color_transform = None
 
         self.frame = None
+        self.scans = []
         self.marker_codes = []
 
     def get_dc_decoder(self, dc_id):
@@ -391,95 +397,177 @@ class JpegImage:
         huffman_ac = self.huffman_ac.get(ac_id)
         return BitDecoder(huffman_ac) if huffman_ac else None
 
-    def prescan(self):
+    @classmethod
+    def is_jpeg(cls, fp):
+        try:
+            pos = fp.tell()
+            data = safe_read(fp, 3)
+            return data == b'\xFF\xD8\xFF'
+        except EOF:
+            return False
+        finally:
+            fp.seek(pos)
+
+    def read_markers(self):
         self.marker_codes = marker_codes = []
 
         skip_till_marker = False
         while True:
+            if skip_till_marker:
+                code = None
+                while code is None or code == 0xFF00:
+                    code = get_marker_code(self.fp, throw=False)
+                skip_till_marker = False
+            else:
+                code = get_marker_code(self.fp)
+
             try:
-                if skip_till_marker:
-                    code = None
-                    while code is None or code == 0xFF00:
-                        code = get_marker_code(self.fp, throw=False)
-                    skip_till_marker = False
-                else:
-                    code = get_marker_code(self.fp)
+                marker = marker_map[code]
+            except KeyError:
+                raise BadMarker(code)
 
-                try:
-                    marker = marker_map[code]
-                except KeyError:
-                    raise BadMarker(code)
-                pos = self.fp.tell()
-                marker_codes.append((code, marker, pos))
+            pos = self.fp.tell()
+            marker_codes.append((code, marker, pos))
 
-                if marker not in (EOI, SOI, RST):
-                    read_block(self.fp)
+            if marker not in (EOI, SOI, RST):
+                read_block(self.fp)
 
-                if marker in (SOS, RST):
-                    skip_till_marker = True
-            except BadMarker:
-                print('Bad marker')
-                break
-            except EOF:
+            if marker in (SOS, RST):
+                skip_till_marker = True
+
+            if marker == EOI:
                 break
 
-        for code, marker, pos in marker_codes:
+    def print_info(self):
+        frame = self.frame
+        scans = self.scans
+
+        for code, marker, pos in self.marker_codes:
             name = marker_names[marker]
             print('Marker 0x{0:X} {1} {2}'.format(code, name, pos))
 
-        markers = [m for c, m, p in marker_codes]
-        assert markers.count(SOI) == 1 and markers[0] == SOI
-        assert markers.count(EOI) == 1 and markers[-1] == EOI
+        if frame.progressive:
+            print('Progressive')
+            print('{} scans'.format(len(scans)))
+            for scan_i, scan in enumerate(scans):
+                scan_type = 'DC' if scan.is_dc else 'AC'
+                cids = [str(c.id) for c in scan.components]
+                print(' {} scan: {}, isRefine={}, nComp={} ({}), Indexes: {}->{}'.format(
+                    scan_i+1, scan_type, scan.is_refine, len(cids),
+                    ','.join(cids), scan.spectral_start, scan.spectral_end))
+        else:
+            print('Baseline')
 
-        assert markers.count(SOF) == 1
+    def validate_markers(self):
+        marker_codes = self.marker_codes
+        markers = [m for c, m, p in marker_codes]
+
+        if SOI not in markers:
+            raise SyntaxError('SOI not found')
+        if not markers.count(SOI) == 1:
+            raise SyntaxError('SOI found {} times'.format(markers.count(SOI)))
+        if not markers[0] == SOI:
+            raise SyntaxError('SOI is not the first market')
+
+        if SOF not in markers:
+            raise SyntaxError('SOF not found')
+        if not markers.count(SOF) == 1:
+            raise SyntaxError('SOF found {} times'.format(markers.count(SOF)))
+
         SOF_marker = next(c for c, m, p in marker_codes if m == SOF)
-        assert SOF_marker not in sof_types.differential
-        assert SOF_marker not in sof_types.loseless
-        assert SOF_marker not in sof_types.arithmetic
+        if SOF_marker in sof_types.differential:
+            raise SyntaxError('Differential is not supported')
+        if SOF_marker in sof_types.loseless:
+            raise SyntaxError('Loseless is not supported')
+        if SOF_marker in sof_types.arithmetic:
+            raise SyntaxError('Arithmetic is not supported')
+
+        if SOS not in markers:
+            raise SyntaxError('SOS not found')
 
         progressive = SOF_marker in sof_types.progressive
-
         if progressive:
-            assert markers.count(SOS) >= 1
+            if markers.count(SOS) == 1:
+                raise SyntaxError('Progressive should contain more than one SOS')
         else:
-            assert markers.count(SOS) == 1
+            if not markers.count(SOS) == 1:
+                raise SyntaxError('Baseline should contain one SOS')
+
         SOS_position = markers.index(SOS)
-        assert SOF in markers[:SOS_position]
-        assert APP in markers[:SOS_position]
+        if SOF not in markers[:SOS_position]:
+            raise SyntaxError('SOF should be before SOS')
 
         if DRI in markers:
-            assert markers.count(DRI) == 1
-            assert RST in markers
-            assert RST not in markers[:SOS_position]
+            if not markers.count(DRI) == 1:
+                raise SyntaxError('DRI found {} times'.format(markers.count(DRI)))
+            if RST not in markers:
+                raise SyntaxError('Found DRI and no RST')
         else:
-            assert RST not in markers
+            if RST in markers:
+                raise SyntaxError('Found RST and no DRI')
 
-        assert DHT in markers
-        assert DQT in markers
-        if not progressive:
-            assert DQT not in markers[SOS_position:]
-            assert DHT not in markers[SOS_position:]
+        if DHT not in markers:
+            raise SyntaxError('DHT is not found')
+        if DQT not in markers:
+            raise SyntaxError('DQT is not found')
 
-        assert DAC not in markers
-        assert DHP not in markers
-        assert EXP not in markers
-        assert JPG not in markers
+        unsupported = (DAC, DHP, EXP, JPG)
+        for marker in unsupported:
+            if marker in markers:
+                name = marker_names[marker]
+                raise SyntaxError('Unsupported 0x{0:X} {1} marker'.format(marker, name))
 
-    def process(self):
-        markers = [m for c, m, p in self.marker_codes]
-        n_scans = markers.count(SOS)
-        scan = 0
+        if progressive:
+            if EOI in markers:
+                if not markers.count(EOI) == 1:
+                    raise SyntaxError('EOI found {} times'.format(markers.count(EOI)))
+                if not markers[-1] == EOI:
+                    raise SyntaxError('EOI is not the last market')
+        else:
+            if EOI not in markers:
+                raise SyntaxError('EOI not found')
+            if not markers.count(EOI) == 1:
+                raise SyntaxError('EOI found {} times'.format(markers.count(EOI)))
+            if not markers[-1] == EOI:
+                raise SyntaxError('EOI is not the last market')
+
+    def parse_marker_blocks(self):
         for code, marker, pos in self.marker_codes:
             parser = parsers.get(marker)
             if not parser:
                 continue
             self.fp.seek(pos)
-            if marker == SOS:
-                scan += 1
-                print('Scan {}/{}'.format(scan, n_scans))
             parser(self, code)
 
+    def decode(self):
+        self.frame.prepare()
+
+        n_scans = len(self.scans)
+        for n, scan in enumerate(self.scans):
+            self.fp.seek(scan.position)
+            print('Scan {}/{}'.format(n, n_scans))
+            decode(self.fp, scan)
+
+        print('Decode finishing..')
         decode_finish(self.frame)
+
+    def process(self):
+        try:
+            is_valid = False
+            self.read_markers()
+            self.validate_markers()
+            self.parse_marker_blocks()
+            self.print_info()
+            self.decode()
+            is_valid = True
+        except EOF:
+            print('Unexpected End-of-file')
+        except BadMarker as e:
+            print('Invalid JPEG structure:', e.msg)
+        except SyntaxError as e:
+            print('Invalid JPEG data:', e.msg)
+        finally:
+            self.is_valid = is_valid
 
     def get_format(self):
         n = len(self.frame.components)

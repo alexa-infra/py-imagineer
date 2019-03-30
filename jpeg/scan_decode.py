@@ -1,5 +1,6 @@
 from io import BytesIO
 from array import array
+from itertools import product
 from .zigzag import dezigzag
 from .idct import idct_2d
 from .utils import high_low4
@@ -336,8 +337,9 @@ def iter_block_samples(component, row, col):
             sub_col = col * h + j
             yield blocks[sub_row * w + sub_col]
 
-def decode(fp, frame, scan):
+def decode(fp, scan):
     reader = BitReader(fp)
+    frame = scan.frame
     components = scan.components
     restart_interval = frame.restart_interval
     non_interleaved = not scan.is_interleaved
@@ -356,35 +358,35 @@ def decode(fp, frame, scan):
     else:
         blocks_x, blocks_y = frame.blocks_size
 
-    for block_row in range(blocks_y):
-        for block_col in range(blocks_x):
-            if non_interleaved:
-                # non-interleaved
-                component = components[0]
-                block = component.blocks[block_row * blocks_x + block_col]
-                decode_fn(component, block)
-            else:
-                # interleaved
+    for block_row, block_col in product(range(blocks_y), range(blocks_x)):
+        if non_interleaved:
+            component = components[0]
+            block = component.blocks[block_row * blocks_x + block_col]
+            decode_fn(component, block)
+        else:
+            # interleaved
+            for component in components:
+                for block in iter_block_samples(component, block_row, block_col):
+                    decode_fn(component, block)
+        if restart_interval:
+            n += 1
+            if n < blocks_x * blocks_y and n % restart_interval == 0:
+                byte1 = reader.read_byte()
+                byte2 = reader.read_byte()
+                assert byte1 == 0xFF, '0x{0:X}'.format(byte1)
+                assert 0xD0 <= byte2 <= 0xD7, '0xFF{0:X}'.format(byte2)
+                assert byte2 == 0xD0 + restart
+                restart = (restart + 1) % 8
+                reader.reset()
                 for component in components:
-                    for block in iter_block_samples(component, block_row, block_col):
-                        decode_fn(component, block)
-            if restart_interval:
-                n += 1
-                if n < blocks_x * blocks_y and n % restart_interval == 0:
-                    byte1 = reader.read_byte()
-                    byte2 = reader.read_byte()
-                    assert byte1 == 0xFF, '0x{0:X}'.format(byte1)
-                    assert 0xD0 <= byte2 <= 0xD7, '0xFF{0:X}'.format(byte2)
-                    assert byte2 == 0xD0 + restart
-                    restart = (restart + 1) % 8
-                    reader.reset()
-                    for component in components:
-                        component.last_dc = 0
-                        if component.huffman_dc:
-                            component.huffman_dc.reset()
-                        if component.huffman_ac:
-                            component.huffman_ac.reset()
-                    scan.prog_state = None
+                    component.last_dc = 0
+                for huff_decoder in scan.huffman_dc.values():
+                    if huff_decoder:
+                        huff_decoder.reset()
+                for huff_decoder in scan.huffman_ac.values():
+                    if huff_decoder:
+                        huff_decoder.reset()
+                scan.prog_state = None
 
 def clamp(x):
     if x < -128:
@@ -393,8 +395,7 @@ def clamp(x):
         return 255
     return x + 128
 
-def decode_prog_block_finish(component, block_data):
-    qt = component.quantization
+def decode_prog_block_finish(component, block_data, qt):
     for c in range(64):
         block_data[c] *= qt[c]
     idct_2d(block_data)
@@ -406,8 +407,9 @@ def decode_finish(frame):
         data = comp.data
         blocks = comp.blocks
         w, h = comp.blocks_size
+        qt = frame.quantization[comp.qc]
         for row in range(h):
             for col in range(w):
                 block = blocks[row * w + col]
-                decode_prog_block_finish(comp, block)
+                decode_prog_block_finish(comp, block, qt)
                 set_block(data, block, row * 8, col * 8, w * 8)
