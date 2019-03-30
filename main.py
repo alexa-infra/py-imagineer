@@ -11,11 +11,6 @@ def main(filename):
             return
 
         frame = img.frame
-
-        print('Size:', frame.w, frame.h)
-        for idx, c in enumerate(frame.components):
-            print('Component sampling {}: {}'.format(idx, c.sampling))
-
         data = img.get_linearized_data()
         fmt = img.get_format()
 

@@ -446,6 +446,10 @@ class JpegImage:
             name = marker_names[marker]
             print('Marker 0x{0:X} {1} {2}'.format(code, name, pos))
 
+        print('Size:', frame.w, frame.h)
+        for idx, c in enumerate(frame.components):
+            print('Component sampling {}: {}'.format(idx, c.sampling))
+
         if frame.progressive:
             print('Progressive')
             print('{} scans'.format(len(scans)))
@@ -530,6 +534,13 @@ class JpegImage:
                 raise SyntaxError('EOI found {} times'.format(markers.count(EOI)))
             if not markers[-1] == EOI:
                 raise SyntaxError('EOI is not the last market')
+
+        if DNL in markers:
+            if not markers.count(DNL) == 1:
+                raise SyntaxError('DNL found {} times'.format(markers.count(DNL)))
+            DNL_position = markers.index(DNL)
+            if not DNL_position == SOS_position + 1:
+                raise SyntaxError('DNL does not follow first SOS')
 
     def parse_marker_blocks(self):
         for code, marker, pos in self.marker_codes:
