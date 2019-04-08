@@ -57,24 +57,6 @@ class BitReader:
             raise SyntaxError('found 0xFF{0:X} marker'.format(next_byte))
         return byte
 
-def test_bit_reader():
-    b = BytesIO(b'\xa0')
-    r = BitReader(b)
-    bits = tuple(r)
-    assert bits == (1, 0, 1, 0, 0, 0, 0, 0)
-
-def test_bit_reader2():
-    b = BytesIO(b'\xa0\x0f')
-    r = BitReader(b)
-    bits = tuple(r)
-    assert bits == (1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1)
-
-def test_bit_reader_ff00():
-    b = BytesIO(b'\xff\x00\xa0')
-    r = BitReader(b)
-    bits = tuple(r)
-    assert bits == (1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0)
-
 def receive(r, length):
     n = 0
     while length:
@@ -105,17 +87,6 @@ def ext_table(n, length):
         return n + bias[length]
     return n
 
-def test_ext_table():
-    assert ext_table(0, 0) == 0
-    assert ext_table(0b0, 1) == -1
-    assert ext_table(0b1, 1) == 1
-    assert ext_table(0b00, 2) == -3
-    assert ext_table(0b01, 2) == -2
-    assert ext_table(0b10, 2) == 2
-    assert ext_table(0b11, 2) == 3
-    assert ext_table(0b000, 3) == -7
-    assert ext_table(0b111, 3) == 7
-
 def receive_and_extend(reader, length):
     n = receive(reader, length)
     return ext_table(n, length)
@@ -133,16 +104,6 @@ def ext_table_pos(n, length):
     ....
     """
     return n + bias2[length]
-
-def test_ext_table_pos():
-    assert ext_table_pos(0, 0) == 1
-    assert ext_table_pos(0b0, 1) == 2
-    assert ext_table_pos(0b1, 1) == 3
-    assert ext_table_pos(0b00, 2) == 4
-    assert ext_table_pos(0b01, 2) == 5
-    assert ext_table_pos(0b10, 2) == 6
-    assert ext_table_pos(0b000, 3) == 8
-    assert ext_table_pos(0b111, 3) == 15
 
 def receive_and_extend_pos(reader, length):
     n = receive(reader, length)
