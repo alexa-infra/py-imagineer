@@ -1,8 +1,8 @@
 from io import BytesIO
 
-from huffman.core import get_frequences, get_huffman_table
-from huffman.encoding import encode, encode_bin
-from huffman.decoding import decode, decode_text
+from ..core import get_frequences, get_huffman_table
+from ..encoding import encode, encode_bin
+from ..decoding import decode, decode_text
 
 
 def test_main():

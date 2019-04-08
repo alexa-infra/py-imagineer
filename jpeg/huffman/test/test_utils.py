@@ -1,4 +1,4 @@
-from huffman.utils import byte_to_bits, bits_to_byte
+from ..utils import byte_to_bits, bits_to_byte
 
 
 def test_bits_to_byte():

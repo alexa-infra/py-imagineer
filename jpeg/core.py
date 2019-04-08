@@ -3,11 +3,10 @@ import math
 from array import array
 from io import BytesIO
 
-import huffman
-from huffman.decoding import BitDecoder
+from . import sof_types, huffman
+from .huffman.decoding import BitDecoder
 from .scan_decode import decode, decode_finish
 from .zigzag import dezigzag
-from . import sof_types
 from .utils import high_low4, make_array
 
 

@@ -1,5 +1,5 @@
-from huffman.core import Node, iter_nodes, iter_leafs, get_frequences
-from huffman.core import get_huffman_table, check_huffman_table
+from ..core import Node, iter_nodes, iter_leafs, get_frequences
+from ..core import get_huffman_table, check_huffman_table
 
 
 def test_iter_nodes():
