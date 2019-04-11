@@ -1,10 +1,12 @@
 import sys
+from tempfile import NamedTemporaryFile
+import subprocess
 from jpeg import JpegImage
-from PIL import Image
+from bmp.core import write_bmp
 
 
-def main(filename):
-    with open(filename, 'rb') as f:
+def main(infile):
+    with open(infile, 'rb') as f:
         img = JpegImage(f)
         img.process()
         if not img.is_valid:
@@ -14,8 +16,14 @@ def main(filename):
         data = img.get_linearized_data()
         fmt = img.get_format()
 
-        dimg = Image.frombytes(fmt, (frame.w, frame.h), data.tobytes())
-        dimg.show()
+    # from PIL import Image
+    # dimg = Image.frombytes(fmt, (frame.w, frame.h), data.tobytes())
+    # dimg.show()
+
+    with NamedTemporaryFile() as f:
+        write_bmp(f, fmt, frame.w, frame.h, data)
+        f.flush()
+        subprocess.run(['display', f.name])
 
 
 if __name__ == '__main__':
