@@ -30,9 +30,6 @@ marker_names = {
     COM: 'COM',
 }
 
-class EOF(Exception):
-    pass
-
 class BadMarker(Exception):
     def __init__(self, byte):
         super().__init__()
@@ -41,7 +38,7 @@ class BadMarker(Exception):
 def safe_read(f, n):
     data = f.read(n)
     if not data or len(data) != n:
-        raise EOF()
+        raise EOFError
     return data
 
 def read_u8(f):
@@ -402,7 +399,7 @@ class JpegImage:
             pos = fp.tell()
             data = safe_read(fp, 3)
             return data == b'\xFF\xD8\xFF'
-        except EOF:
+        except EOFError:
             return False
         finally:
             fp.seek(pos)
@@ -570,7 +567,7 @@ class JpegImage:
             self.print_info()
             self.decode()
             is_valid = True
-        except EOF:
+        except EOFError:
             print('Unexpected End-of-file')
         except BadMarker as e:
             print('Invalid JPEG structure:', e.msg)
